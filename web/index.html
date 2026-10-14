@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DelTool · Field Delineation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Slab:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ============================================================ loading -->
+<div id="loader">
+  <div class="loader-inner">
+    <svg id="loader-art" viewBox="0 0 420 260" aria-hidden="true"></svg>
+    <h1 class="brand-title">Del<span>Tool</span></h1>
+    <p class="loader-sub">Field delineation from satellite imagery</p>
+    <div class="loader-status">
+      <span class="spinner"></span><span id="loader-msg">Starting server…</span>
+    </div>
+  </div>
+  <div class="loader-credits">TU Delft &nbsp;·&nbsp; TAHMO &nbsp;·&nbsp; Delineate-Anything</div>
+</div>
+
+<!-- ============================================================== panel -->
+<aside id="panel">
+  <header class="brand">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M3 5 L15 3 L16 14 L4 16 Z" />
+      <path d="M18 3 L29 5 L28 13 L19 14 Z" />
+      <path d="M4 19 L16 17 L15 29 L5 28 Z" />
+      <path d="M19 17 L28 16 L29 27 L18 29 Z" />
+    </svg>
+    <div>
+      <h1 class="brand-title">Del<span>Tool</span></h1>
+      <div class="brand-sub">Field delineation from satellite imagery</div>
+    </div>
+    <span id="device-badge" class="chip"></span>
+  </header>
+  <div class="active-model" id="active-model" title="Model used for the next run">
+    <span class="am-label">Model</span>
+    <span class="am-name" id="active-model-name">–</span>
+    <span class="am-tag" id="active-model-tag"></span>
+  </div>
+
+  <div class="scroll">
+    <!-- 1. Model -->
+    <section class="card">
+      <h2><span class="step">1</span>Model &amp; hardware
+        <i class="info" data-tip="Both models are Delineate-Anything v2 (YOLO11x instance segmentation, 512 px tiles). They differ only in the training data of their weights."></i>
+      </h2>
+      <div id="model-options" class="model-options" role="radiogroup"></div>
+      <div class="helper">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 9v5M10 6.2v.1"/></svg>
+        <div><b>Which model?</b> Use the <b>Fine-tuned</b> model (recommended) for smallholder
+          fields on ~1 m imagery. Switch to <b>Baseline</b> only for large, regular
+          fields (roughly &gt; 5 ha) — it tends to merge or miss small plots. Not sure? Run both on
+          the same box and compare them under <i>Previous runs</i>.</div>
+      </div>
+      <label class="device-label"><span class="lbl">Compute device
+        <i class="info" data-tip="Where the model runs. GPU (NVIDIA CUDA) is typically 10–40× faster than CPU. Auto picks the GPU when PyTorch can use one."></i></span>
+        <div class="seg seg3" id="device"></div>
+      </label>
+      <div id="device-hint" class="device-hint hidden"></div>
+    </section>
+
+    <!-- 2. Area -->
+    <section class="card">
+      <h2><span class="step">2</span>Area of interest
+        <i class="info" data-tip="Draw a rectangle on the map. Imagery is downloaded for exactly this box and the model delineates all fields inside it. Drag the corner handles to adjust, or type the coordinates (WGS84 degrees)."></i>
+      </h2>
+      <div class="row">
+        <button id="btn-draw" class="btn btn-outline grow">
+          <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="1.5" stroke-dasharray="3 2"/></svg>
+          Draw bounding box
+        </button>
+        <button id="btn-clear-bbox" class="btn btn-icon" title="Remove box">✕</button>
+      </div>
+      <div class="grid2 coords">
+        <label>West<input id="bbox-w" type="number" step="any"></label>
+        <label>East<input id="bbox-e" type="number" step="any"></label>
+        <label>South<input id="bbox-s" type="number" step="any"></label>
+        <label>North<input id="bbox-n" type="number" step="any"></label>
+      </div>
+      <div class="row search">
+        <input id="goto" placeholder="Go to coordinate: lat, lon">
+        <button id="btn-goto" class="btn btn-icon" title="Go">→</button>
+      </div>
+      <div id="plan-info" class="plan muted">Draw a box on the map to start.</div>
+    </section>
+
+    <!-- 3. Imagery -->
+    <section class="card">
+      <h2><span class="step">3</span>Imagery</h2>
+      <label>
+        <span class="lbl">Resolution
+          <i class="info" data-tip="Ground size of one pixel in the GeoTIFF the model sees. Finer (smaller) = more detail but more pixels, longer downloads and longer inference. The model tile is 512 px, so at 1 m one tile covers 512 × 512 m."></i>
+        </span>
+        <div class="seg" id="resolution"></div>
+        <input id="resolution-custom" type="number" step="0.1" min="0.1" placeholder="Custom (m/px)">
+      </label>
+    </section>
+
+    <!-- 4. Post-processing -->
+    <section class="card">
+      <h2><span class="step">4</span>Post-processing</h2>
+      <div class="grid2">
+        <label><span class="lbl">Min field area (m²)
+          <i class="info" data-tip="Polygons smaller than this are discarded, and holes smaller than this inside a field are filled. 2500 m² = 0.25 ha (Delineate-Anything default)."></i></span>
+          <input id="min_area_m2" type="number" min="0" step="100"></label>
+        <label><span class="lbl">Simplify (m)
+          <i class="info" data-tip="Douglas-Peucker tolerance. Removes the pixel staircase from polygon outlines; vertices closer than this distance to the simplified line are dropped. 0 = keep raw pixel edges."></i></span>
+          <input id="simplify_m" type="number" min="0" step="0.5"></label>
+      </div>
+      <details>
+        <summary>Advanced model settings</summary>
+        <label><span class="lbl">Tile overlap <output id="overlap-val"></output>
+          <i class="info" data-tip="The image is processed in 512 px tiles. Overlap is the fraction shared between neighbouring tiles. Each field is taken from the tile where it is most central, so more overlap = fewer fields cut at tile edges, but more tiles to process (0.5 ≈ 4× the tiles of 0)."></i></span>
+          <input id="overlap" type="range" min="0" max="0.75" step="0.05"></label>
+        <label><span class="lbl">NMS IoU <output id="iou-val"></output>
+          <i class="info" data-tip="Non-maximum suppression threshold inside one tile: when two predicted fields overlap more than this (intersection over union), only the most confident one is kept. Lower = more aggressive removal of overlapping duplicates."></i></span>
+          <input id="iou" type="range" min="0.1" max="0.95" step="0.05"></label>
+        <label><span class="lbl">Batch size
+          <i class="info" data-tip="Number of 512 px tiles sent through the model at once. Higher is faster on a GPU but needs more (V)RAM. Roughly 1 GB per tile on GPU."></i></span>
+          <input id="batch_size" type="number" min="1" max="64" step="1"></label>
+      </details>
+    </section>
+
+    <!-- 5. Run -->
+    <section class="card">
+      <h2><span class="step">5</span>Run</h2>
+      <label><span class="lbl">Run name <span class="muted">(optional)</span></span>
+        <input id="run-name" placeholder="e.g. Tamale_north"></label>
+      <button id="btn-generate" class="btn btn-primary" disabled>
+        <svg viewBox="0 0 20 20"><path d="M6 4 L16 10 L6 16 Z"/></svg>
+        Generate fields
+      </button>
+      <div id="progress" class="hidden">
+        <ol class="stepper">
+          <li data-stage="imagery">Imagery</li>
+          <li data-stage="inference">Delineation</li>
+          <li data-stage="vectorize">Polygons</li>
+        </ol>
+        <div class="bar"><div id="progress-fill"></div></div>
+        <div class="row between">
+          <span id="progress-msg" class="muted small"></span>
+          <button id="btn-cancel" class="btn btn-ghost-danger btn-sm">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Results -->
+    <section id="results" class="card card-accent hidden">
+      <h2><span class="step">6</span>Results <span id="result-name" class="result-name"></span></h2>
+      <div id="result-stats" class="stats"></div>
+
+      <label class="conf">
+        <span class="lbl">Minimum confidence <output id="confidence-val"></output>
+          <i class="info" data-tip="Model confidence (0–1) per field. Only fields with confidence ≥ this value are shown and exported. Slide to filter live — no re-run needed. 0.15 is the Delineate-Anything default."></i></span>
+        <input id="confidence" type="range" min="0.05" max="0.95" step="0.01">
+      </label>
+
+      <div class="toggles">
+        <label class="switch"><span>Field outlines</span>
+          <input id="toggle-fields" type="checkbox" checked><i></i></label>
+        <label class="switch"><span>Imagery seen by the model
+          <i class="info" data-tip="Overlay the exact GeoTIFF (Google imagery, resampled to your resolution) that the model delineated, instead of the Esri basemap. Useful because imagery dates differ between providers."></i></span>
+          <input id="toggle-imagery" type="checkbox"><i></i></label>
+        <input id="imagery-opacity" class="hidden" type="range" min="0" max="1" step="0.05" value="1" title="Imagery opacity">
+      </div>
+
+      <details>
+        <summary>Re-filter polygons (no model re-run)</summary>
+        <div class="grid2">
+          <label><span class="lbl">Min area (m²)</span><input id="pp-min-area" type="number" min="0" step="100"></label>
+          <label><span class="lbl">Simplify (m)</span><input id="pp-simplify" type="number" min="0" step="0.5"></label>
+        </div>
+        <button id="btn-postprocess" class="btn btn-outline btn-block">Apply</button>
+      </details>
+
+      <h3>Export
+        <i class="info" data-tip="Exports the fields currently visible (above the minimum confidence). UTM keeps metric coordinates (best for area calculations); KML and GeoJSON are always WGS84."></i>
+      </h3>
+      <div class="grid2">
+        <select id="export-format"></select>
+        <select id="export-crs">
+          <option value="utm">UTM (metric)</option>
+          <option value="EPSG:4326">WGS84 · EPSG:4326</option>
+          <option value="EPSG:3857">Web Mercator · EPSG:3857</option>
+        </select>
+      </div>
+      <div class="row">
+        <button id="btn-export" class="btn btn-primary grow">Download fields</button>
+        <button id="btn-imagery" class="btn btn-outline" title="Download the imagery GeoTIFF">GeoTIFF</button>
+      </div>
+    </section>
+
+    <!-- History -->
+    <section class="card">
+      <h2>Previous runs</h2>
+      <ul id="job-list"></ul>
+    </section>
+
+    <footer class="credits">
+      <div class="credit-logos">
+        <span class="org">TU Delft</span><span class="sep"></span><span class="org">TAHMO</span>
+      </div>
+      <p>Developed at <b>Delft University of Technology</b> (IFM4040 Joint Interdisciplinary Project)
+        in collaboration with <b>TAHMO</b>, the Trans-African Hydro-Meteorological Observatory.</p>
+      <p class="muted">Models: Delineate-Anything v2 (Lavreniuk et al.), baseline and fine-tuned. Imagery: Google Satellite. Basemap: Esri World Imagery.</p>
+    </footer>
+  </div>
+</aside>
+
+<main id="map"></main>
+<div id="map-legend" class="hidden"></div>
+<div id="tooltip" role="tooltip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="/static/loader.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
