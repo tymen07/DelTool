@@ -83,7 +83,10 @@ def save_fields(fields: gpd.GeoDataFrame, run_dir: Path):
 
 
 def load_fields(run_dir: Path) -> gpd.GeoDataFrame:
-    return gpd.read_file(run_dir / FIELDS_FILE, layer=FIELDS_LAYER, engine="pyogrio")
+    fields = gpd.read_file(run_dir / FIELDS_FILE, layer=FIELDS_LAYER, engine="pyogrio")
+    if "source" not in fields:  # runs from before manual editing existed
+        fields.insert(4, "source", "model")
+    return fields
 
 
 def run_pipeline(params: RunParams, run_dir: Path, report):

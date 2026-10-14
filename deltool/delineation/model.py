@@ -6,43 +6,18 @@ Other models are loaded on first use and then stay cached. torch/ultralytics
 are imported lazily so the web server itself starts instantly.
 """
 
-import shutil
-import subprocess
-import sys
 import threading
 from functools import lru_cache
 
-from deltool.config import DEFAULT_MODEL, MODEL_TILE_PX, MODELS
+from deltool import environment
+from deltool.config import DEFAULT_MODEL, MODEL_TILE_PX, MODELS, PROJECT_ROOT
 
 _lock = threading.Lock()
 _models = {}  # model key -> YOLO
-_status = {"state": "idle", "message": "Model not loaded", "device": None}
+_status = {"state": "idle", "message": "Model not loaded", "device": None, "checks": []}
 
 
 # ---------------------------------------------------------------- devices
-@lru_cache(maxsize=1)
-def _system_gpus():
-    """NVIDIA GPUs present in the machine, even if PyTorch can't use them."""
-    if shutil.which("nvidia-smi"):
-        try:
-            out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                                 capture_output=True, text=True, timeout=5).stdout
-            return [line.strip() for line in out.splitlines() if line.strip()]
-        except (OSError, subprocess.SubprocessError):
-            pass
-    if sys.platform == "win32":
-        try:
-            out = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "(Get-CimInstance Win32_VideoController).Name"],
-                capture_output=True, text=True, timeout=10,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
-            return [n.strip() for n in out.splitlines() if "nvidia" in n.lower()]
-        except (OSError, subprocess.SubprocessError):
-            pass
-    return []
-
-
 @lru_cache(maxsize=1)
 def devices():
     """What compute devices are available, plus a hint when a GPU exists but
@@ -50,19 +25,21 @@ def devices():
     import torch
 
     info = {"cuda_available": torch.cuda.is_available(), "torch": torch.__version__,
-            "torch_cuda": torch.version.cuda, "gpu_name": None, "hint": ""}
+            "torch_cuda": torch.version.cuda, "gpu_name": None, "hint": "", "hint_short": ""}
     if info["cuda_available"]:
         info["gpu_name"] = torch.cuda.get_device_name(0)
         return info
 
-    gpus = _system_gpus()
-    if gpus:
-        info["gpu_name"] = gpus[0]
-        info["hint"] = (f"{gpus[0]} detected, but the installed PyTorch ({torch.__version__}) "
-                        "is CPU-only. Install a CUDA build of PyTorch to use the GPU "
-                        "(see README › GPU).")
+    gpu = environment.nvidia_gpu()
+    if gpu:
+        info["gpu_name"] = gpu["name"]
+        info["hint"] = environment.gpu_message() or (
+            f"{gpu['name']} found, but PyTorch ({torch.__version__}) can't use it (see README › GPU).")
+        info["hint_short"] = ("GPU driver too old for PyTorch" if not environment.driver_ok(gpu)
+                              else "GPU found, but PyTorch is CPU-only")
     else:
         info["hint"] = "No NVIDIA GPU detected; running on CPU."
+        info["hint_short"] = "No NVIDIA GPU, running on CPU"
     return info
 
 
@@ -124,8 +101,26 @@ def get_model(key=DEFAULT_MODEL, device="cpu"):
         return _models[key]
 
 
+def _check_environment():
+    """Packages and model weights, shown as a checklist on the loading screen.
+    Returns False if something required is missing."""
+    _status.update(state="checking", message="Checking installed packages")
+    checks = environment.check_runtime(progress=lambda msg: _status.update(message=msg))
+    for key, spec in MODELS.items():
+        exists = spec["path"].exists()
+        checks.append({"name": f"{spec['short']} weights", "ok": exists, "optional": key != DEFAULT_MODEL,
+                       "detail": "" if exists else f"{spec['path'].relative_to(PROJECT_ROOT)} not found"})
+    _status["checks"] = checks
+    failed = [c for c in checks if not c["ok"] and not c.get("optional")]
+    if failed:
+        _status.update(state="error", message="Missing: " + "; ".join(f"{c['name']} ({c['detail']})" for c in failed)
+                       + ". Restart with python run.py to install missing packages.")
+    return not failed
+
+
 def preload():
     try:
-        get_model(DEFAULT_MODEL, resolve_device("auto"))
+        if _check_environment():
+            get_model(DEFAULT_MODEL, resolve_device("auto"))
     except Exception as exc:  # noqa: BLE001 - shown on the loading screen
         _status.update(state="error", message=f"Model failed to load: {exc}")

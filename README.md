@@ -8,15 +8,26 @@ map, ready to export.
 
 ## Run
 
+Needs Python 3.10 or newer. On Windows, double-click `DelTool.bat`, or:
+
 ```bash
-pip install -r requirements.txt
 python run.py            # opens http://127.0.0.1:8000
 ```
 
-Options: `--port 8080`, `--host 0.0.0.0` (expose on LAN), `--no-browser`.
+The first start creates a Python environment in `.venv/` and installs
+everything from `requirements.txt` into it. PyTorch comes from the CUDA package
+index when an NVIDIA GPU is found. This takes a few minutes and needs internet.
+Later starts only install what is missing, for example after
+`requirements.txt` changes.
 
-The browser opens as soon as the server is up. A loading screen is shown while
-the model is loaded into memory and warmed up (once per server start, about
+Options: `--port 8080`, `--host 0.0.0.0` (expose on LAN), `--no-browser`,
+`--no-venv` (install into and run with the current Python instead of `.venv/`).
+If you start DelTool from an activated virtualenv or conda environment, that
+environment is used.
+
+The browser opens as soon as the server is up. The loading screen checks that
+every package imports and the model weights exist (missing packages are
+installed), then loads and warms up the model (once per server start, about
 5–10 s); after that every run reuses the in-memory model. It runs on CUDA
 automatically if a GPU-enabled PyTorch is installed, otherwise on CPU (about
 1.5 s per 512 px model tile).
@@ -36,16 +47,26 @@ other models load the first time you use them and then stay in memory.
 
 The *Compute device* picker (Auto / GPU / CPU) uses an NVIDIA GPU when
 PyTorch has CUDA support. If a GPU is present but can't be used, the panel says
-why. To enable it:
+why: hover the (i) next to the message.
 
-1. Update the NVIDIA driver. CUDA 12 builds of PyTorch need driver ≥ 525.
-2. Replace the CPU-only PyTorch with a CUDA build. Get the install command from
-   https://pytorch.org/get-started/locally/, for example:
-   `pip install --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu126`
-   Pascal cards such as the Quadro P2000 (compute capability 6.1) are not
-   supported by the newest CUDA builds of PyTorch. Use a build that still
-   includes sm_61, such as cu126.
-3. Check it: `python -c "import torch; print(torch.cuda.is_available())"`
+DelTool finds NVIDIA GPUs itself, even when `nvidia-smi` is not on the PATH.
+With `python run.py` (or `DelTool.bat`), it installs the CUDA build of
+PyTorch into `.venv/` when the GPU's driver is new enough. If a CPU-only
+PyTorch is already there, it swaps it for the CUDA build (about 2.5 GB, once).
+So to enable the GPU:
+
+1. Update the NVIDIA driver if the panel says it is too old. CUDA 12 builds of
+   PyTorch need driver 527.41 or newer on Windows (525.60 on Linux). Get it from
+   https://www.nvidia.com/en-us/drivers/ (for a Quadro P2000: Quadro / NVIDIA
+   RTX series, Quadro P2000).
+2. Restart DelTool. The GPU badge at the top of the panel should say GPU.
+
+PyTorch comes from the cu126 index, which still supports Pascal cards such as
+the Quadro P2000 (compute capability 6.1); the newest CUDA builds don't. With
+`--no-venv` or your own environment, DelTool doesn't change PyTorch; install
+it yourself, e.g.
+`pip install --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu126`,
+and check with `python -c "import torch; print(torch.cuda.is_available())"`.
 
 On GPUs older than Volta, inference runs in FP32, since FP16 is slow on those
 cards. With 4 GB of VRAM, use a batch size of about 4.
@@ -54,7 +75,8 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
 
 0. **Model & hardware**: pick the model and the compute device. The model
    used for the next run is shown at the top of the panel.
-1. **Area**: click *Draw bounding box* and drag on the map. You can also
+1. **Area**: the map opens on Ghana. Click *Draw bounding box*, then click two
+   opposite corners on the map. You can also
    type W/S/E/N coordinates, and drag the box corners to adjust it. The panel
    shows the area, pixel size, UTM zone and an estimate of the run time.
 2. **Imagery**: pick the resolution (m/pixel). Imagery is downloaded from
@@ -62,7 +84,7 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
    The resolution sets both the download zoom level and the GeoTIFF pixel size
    the model runs on.
 3. **Post-processing**: set the minimum field area and the simplification.
-   Tile overlap, NMS IoU and batch size are under *Advanced*. Hover over the
+   Tile overlap, NMS IoU and batch size are under *Advanced*. Hover over or click the
    (i) icons for an explanation of each parameter.
 4. **Generate**: the job runs in the background with a progress bar and can be
    cancelled.
@@ -72,12 +94,46 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
    area, perimeter and confidence, or to delete it. You can overlay the exact imagery
    the model saw, and *Re-filter* polygons by minimum area or simplification
    without re-running the model.
-6. **Export**: only the fields above the confidence slider are exported. Formats: GeoPackage, GeoJSON, Shapefile (zip), KML, FlatGeobuf or CSV
-   (WKT), in UTM, WGS84 or Web Mercator. You can also download the
-   source GeoTIFF.
+6. **Edit**: *Edit polygons* opens an edit toolbar on the map. You can do
+   this as in QGIS, with snapping to neighbouring fields:
+   - click a field and drag its vertices (drag a midpoint to add a vertex,
+     right-click a vertex to remove it)
+   - *New field* (N): click the vertices, then click the first one to close
+   - *Split* (S): draw a line across one or more fields
+   - Shift+click several fields, then *Merge* (M). Gaps of up to 20 m are closed.
+   - *Delete* (Del), *Undo* (Ctrl+Z, up to 30 steps)
+   - *No overlaps* clips new and edited fields against their neighbours.
+
+   Every change is saved immediately. The field's `source` becomes `edited`,
+   or `manual` for a drawn field. *QGIS* opens the field boundaries in a locally
+   installed QGIS, on top of Esri World Imagery (XYZ tiles). The imagery
+   GeoTIFF is not included. A `.qgz` project is saved next to the fields, so
+   you can reopen it later. After saving the layer there, *Load edits* reads
+   the fields back. Set `DELTOOL_QGIS` if QGIS is not found automatically.
+7. **Export**: only the fields above the confidence slider are exported. Formats: GeoPackage, GeoJSON, Shapefile (zip), KML, FlatGeobuf or CSV
+   (WKT), in UTM, WGS84 or Web Mercator. The imagery GeoTIFF stays on the
+   server: it is used for the run but can't be downloaded.
 
 Earlier runs are listed under *Previous runs* and kept across restarts. A run
-can be linked directly with `http://127.0.0.1:8000/?run=<run id>`.
+can be linked directly with `http://127.0.0.1:8000/?run=<run id>`. *Delete
+all* removes every run and its files, except a run that is still running.
+
+## Field database
+
+*Save to database* (under Results) stores the fields shown, including edits,
+in `database/deltool.sqlite`. This is one database for all runs. Saving the
+same run again replaces it. Saved fields are kept when you delete the run.
+
+- *Show saved fields on map* draws the saved fields of other runs as green
+  dashed outlines, so you can see which areas were already delineated.
+- When you draw a box, the panel shows how many saved fields are already in
+  that area.
+- When you save, DelTool reports which saved fields of other runs overlap
+  the new ones.
+- *Export all saved fields* (GeoPackage, GeoJSON, Shapefile, KML, FlatGeobuf
+  or CSV), or open them all in QGIS. Each field has `run_id`, `run_name`,
+  `field_id`, `area_ha`, `perimeter_m`, `confidence`, `source`, `model` and
+  `saved`.
 
 ## Structure
 
@@ -88,6 +144,10 @@ deltool/
   api.py                   FastAPI routes + serves the frontend
   jobs.py                  background job queue, job.json persistence
   pipeline.py              bbox -> imagery -> model -> polygons
+  editing.py               reshape / draw / merge / split / delete fields, undo
+  database.py              SQLite field database of saved runs
+  qgis.py                  find and open a local QGIS
+  environment.py           .venv creation, package check and install
   export.py                GPKG / GeoJSON / SHP / KML / FGB / CSV export
   imagery/
     tiles.py               XYZ tile math + downloading (from Scarlett V7)
@@ -98,12 +158,15 @@ deltool/
     vectorize.py           label raster -> cleaned polygons with attributes
 web/
   index.html               page layout
-  static/app.js            map, bbox drawing, jobs, results, export
+  static/app.js            map, bbox, jobs, results, editing, database, export
   static/loader.js         startup loading screen (field animation + model status)
   static/style.css         TU Delft themed styling
+DelTool.bat                Windows launcher (double-click)
 DelAny/best_unfrozen.pt    fine-tuned model weights
 Tiffany/Scarlett V7.py     original standalone imagery script (reference)
-outputs/<run id>/          per run: mosaic_utm.tif, labels.tif, fields.gpkg, job.json
+outputs/<run id>/          per run: mosaic_utm.tif, labels.tif, fields.gpkg, job.json,
+                           edits/ (undo history), qgis/ (copies opened in QGIS)
+database/deltool.sqlite    field database (kept when runs are deleted)
 ```
 
 ## How delineation works
@@ -115,7 +178,8 @@ outputs/<run id>/          per run: mosaic_utm.tif, labels.tif, fields.gpkg, job
 - Kept instances are painted into a label raster, highest confidence last. The
   raster is then polygonized, polygons smaller than the minimum area and small
   holes are removed, and the result is simplified.
-- Attributes: `field_id`, `area_ha`, `perimeter_m`, `confidence`.
+- Attributes: `field_id`, `area_ha`, `perimeter_m`, `confidence`, `source`
+  (`model`, `edited` or `manual`).
 
 Known limitation: a field larger than one 512 px tile can be cut along a tile
 edge. If this happens, use a coarser resolution.

@@ -11,6 +11,7 @@ MODELS = {
         "short": "Fine-tuned",
         "path": PROJECT_ROOT / "DelAny" / "best_unfrozen.pt",
         "recommended": True,
+        "tagline": "Small fields",
         "description": "Delineate-Anything v2 fine-tuned on our own labelled imagery of "
                        "smallholder fields. Best choice for small, irregular fields on "
                        "~1 m Google imagery.",
@@ -20,6 +21,7 @@ MODELS = {
         "short": "Baseline",
         "path": PROJECT_ROOT / "DelAny" / "DelineateAnythingv2.pt",
         "recommended": False,
+        "tagline": "Large fields",
         "description": "Original Delineate-Anything v2 weights (Lavreniuk et al.), trained "
                        "on 0.25–10 m imagery worldwide. Better suited to large, regular "
                        "(mechanised) fields; tends to miss or merge small fields.",
@@ -33,6 +35,12 @@ DEFAULT_MODEL = "finetuned"
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
 WEB_DIR = PROJECT_ROOT / "web"
+
+# Field database: saved delineations of all runs, kept when runs are deleted.
+DATABASE_PATH = PROJECT_ROOT / "database" / "deltool.sqlite"
+
+# Number of edit steps per run that can be undone.
+EDIT_HISTORY_LIMIT = 30
 
 # ---------------------------------------------------------------------------
 # Imagery

@@ -1,12 +1,16 @@
+# Installed automatically by `python run.py` (into .venv/). PyTorch is taken
+# from the CUDA package index when an NVIDIA GPU is present.
+torch>=2.2
+torchvision>=0.17
+ultralytics>=8.3.148
 fastapi>=0.110
 uvicorn>=0.29
 pydantic>=2
-ultralytics>=8.3.148
-torch>=2.2
 numpy
 rasterio>=1.3
 geopandas>=1.0
 pyogrio>=0.7
 shapely>=2.0
+pandas
 requests
 pillow

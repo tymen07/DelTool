@@ -50,6 +50,7 @@ def vectorize_labels(raster: LabelRaster, min_area_m2, simplify_m) -> gpd.GeoDat
 
     gdf.insert(0, "area_ha", (gdf.geometry.area / 10_000).round(4))
     gdf.insert(1, "perimeter_m", gdf.geometry.length.round(2))
+    gdf.insert(3, "source", "model")   # model | edited | manual
     gdf = gdf.sort_values("area_ha", ascending=False).reset_index(drop=True)
     gdf.insert(0, "field_id", np.arange(1, len(gdf) + 1))
     return gdf

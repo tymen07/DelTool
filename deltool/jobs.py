@@ -114,6 +114,17 @@ class JobManager:
         shutil.rmtree(job.dir, ignore_errors=True)
         return True
 
+    def delete_all(self):
+        """Delete every run except one that is running. Returns (deleted, skipped)."""
+        deleted, skipped = [], []
+        for job in list(self._jobs.values()):
+            if job.status == "running":
+                skipped.append(job.id)
+            else:
+                self.delete(job.id)
+                deleted.append(job.id)
+        return deleted, skipped
+
     # --------------------------------------------------------------- worker
     def _worker(self):
         while True:
