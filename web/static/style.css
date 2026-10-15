@@ -421,29 +421,39 @@ summary .info { display: inline-grid; vertical-align: -3px; margin-left: 4px; }
 /* ------------------------------------------------------- edit toolbar */
 #edit-toolbar {
   position: absolute; z-index: 900; top: 16px; left: calc(404px + (100% - 404px - 70px) / 2); transform: translateX(-50%);
-  display: flex; flex-direction: column; align-items: center; gap: 6px; width: max-content; max-width: calc(100% - 404px - 90px);
+  display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 404px - 90px);
 }
-.et-tools {
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px; padding: 5px;
-  background: var(--panel); border: 1px solid rgba(255,184,28,.45); border-radius: 12px; box-shadow: var(--shadow); backdrop-filter: blur(12px);
+.et-dock, .et-bulkbar {
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch; gap: 6px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); backdrop-filter: blur(12px);
 }
-.et-tools button {
-  display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 12.5px; font-weight: 600;
-  color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer;
-  transition: background .15s, border-color .15s, color .15s;
+.et-bulkbar { align-items: center; border-color: rgba(255,184,28,.55); }
+.et-group { display: flex; align-items: stretch; gap: 2px; padding: 0 6px; border-right: 1px solid var(--line); }
+.et-group:last-of-type { border-right: 0; }
+.et-dock > .primary { margin-left: 4px; }
+.et-dock button, .et-bulkbar button {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 58px;
+  font: inherit; font-size: 11px; font-weight: 600; color: var(--text); background: transparent; border: 1px solid transparent;
+  border-radius: 10px; padding: 7px 8px; cursor: pointer; transition: background .15s, border-color .15s, color .15s;
 }
-.et-tools button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
-.et-tools button:hover:not(:disabled) { background: var(--card); border-color: var(--line); }
-.et-tools button.active { background: rgba(255,184,28,.18); border-color: var(--tud-yellow); color: var(--tud-yellow); }
-.et-tools button.danger:not(:disabled) { color: #ff8a80; }
-.et-tools button.primary { background: var(--tud-yellow); color: var(--tud-darkblue); margin-left: 4px; }
-.et-tools button.primary:hover { background: #ffc94d; }
-.et-tools button:disabled { opacity: .35; cursor: not-allowed; }
-.et-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line); }
-.et-check { display: inline-flex; align-items: center; gap: 6px; margin: 0 4px; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
-.et-check input { width: auto; accent-color: var(--tud-yellow); }
+.et-bulkbar button { flex-direction: row; font-size: 12.5px; padding: 8px 14px; }
+.et-dock button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.et-dock button:hover:not(:disabled), .et-bulkbar button:hover:not(:disabled) { background: var(--card); border-color: var(--line); }
+.et-dock button.active { background: rgba(255,184,28,.18); border-color: var(--tud-yellow); color: var(--tud-yellow); }
+.et-dock button.danger:not(:disabled), .et-bulkbar button.danger:not(:disabled) { color: #ff8a80; }
+.et-dock button.primary, .et-bulkbar button.primary { background: var(--tud-yellow); color: var(--tud-darkblue); }
+.et-dock button.primary:hover, .et-bulkbar button.primary:hover:not(:disabled) { background: #ffc94d; }
+.et-dock button:disabled, .et-bulkbar button:disabled { opacity: .35; cursor: not-allowed; }
+.et-options { flex-direction: column; justify-content: center; align-items: flex-start; gap: 8px; }
+.et-switch { display: flex; align-items: center; gap: 8px; line-height: 1; margin: 0; font-size: 11.5px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.et-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.et-switch i { position: relative; width: 26px; height: 15px; border-radius: 999px; background: var(--line); transition: background .15s; flex: none; }
+.et-switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.et-switch input:checked + i { background: var(--tud-yellow); }
+.et-switch input:checked + i::after { transform: translateX(11px); }
+.et-switch input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
 .et-hint {
-  padding: 5px 12px; border-radius: 999px; font-size: 12px; color: var(--text); text-align: center;
+  padding: 5px 14px; border-radius: 999px; font-size: 12px; color: var(--text); text-align: center;
   background: rgba(12,35,64,.85); border: 1px solid var(--line); backdrop-filter: blur(8px);
 }
 #edit-toolbar.busy .et-hint::after { content: " · saving…"; color: var(--tud-yellow); }
@@ -559,3 +569,8 @@ body.rainbow h1, body.rainbow h2, body.rainbow h3, body.rainbow .credit-logos .o
 }
 body.rainbow .leaflet-container, body.rainbow #map { animation: rb-hue 2s linear infinite; }
 @media (prefers-reduced-motion: reduce) { body.rainbow, body.rainbow * { animation-duration: 8s !important; } }
+
+/* edit toolbar sits at the top: dock first, then the bulk bar, then the hint */
+.et-dock { order: 1; }
+.et-bulkbar { order: 2; }
+.et-hint { order: 3; }

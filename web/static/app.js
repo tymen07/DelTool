@@ -110,7 +110,7 @@ const FIELD_STYLE = { color: CYAN, weight: 1.8, fillColor: CYAN, fillOpacity: 0.
 const FIELD_HOVER = { color: YELLOW, weight: 2.6, fillColor: YELLOW, fillOpacity: 0.22 };
 const FIELD_SELECTED = { color: YELLOW, weight: 3, fillColor: YELLOW, fillOpacity: 0.32 };
 const DRAW_STYLE = { color: YELLOW, weight: 2.5, fillColor: YELLOW, fillOpacity: 0.15 };
-const SNAP = { snappable: true, snapDistance: 14 };
+const snapOpts = () => ({ snappable: $("et-snap").checked, snapDistance: 14 });
 
 // ---------------------------------------------------------------- tabs
 // The panel is split into steps: 1 Area, 2 Imagery, 3 Run, 4 Results.
@@ -259,7 +259,7 @@ function startDraw(kind) {
     map.pm.enableDraw("Rectangle", { pathOptions: BBOX_STYLE, templineStyle: BBOX_STYLE, hintlineStyle: hint, snappable: false });
   } else {
     const shape = kind === "field" ? "Polygon" : "Line";
-    map.pm.enableDraw(shape, { ...SNAP, allowSelfIntersection: false, pathOptions: DRAW_STYLE,
+    map.pm.enableDraw(shape, { ...snapOpts(), allowSelfIntersection: false, pathOptions: DRAW_STYLE,
       templineStyle: DRAW_STYLE, hintlineStyle: { ...DRAW_STYLE, dashArray: "5 5" } });
   }
   syncVertexEdit();
@@ -681,7 +681,6 @@ async function pollJob() {
     if (job.status === "done") {
       await showResults(job, { fit: true });
       showTab("results");
-      rainbow(8000);
     }
   }
 }
@@ -902,7 +901,7 @@ function setEditing(on) {
   state.editing = on;
   cancelDraw();
   map.closePopup();
-  if (!on) state.selected.clear();
+  if (!on) { state.selected.clear(); state.bulk = false; }
   if (on) $("toggle-fields").checked = true;
   syncResultLayers();
   document.body.classList.toggle("editing", on);
@@ -914,7 +913,7 @@ function setEditing(on) {
 }
 
 function selectField(id, additive) {
-  if (additive) state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id);
+  if (additive || state.bulk) state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id);
   else state.selected = new Set([id]);
   refreshSelection();
 }
@@ -926,7 +925,7 @@ function refreshSelection() {
 }
 
 map.on("click", () => {
-  if (state.editing && !state.drawKind && state.selected.size) {
+  if (state.editing && !state.drawKind && !state.bulk && state.selected.size) {
     state.selected.clear();
     refreshSelection();
   }
@@ -934,7 +933,7 @@ map.on("click", () => {
 
 // Vertex editing is on for exactly one selected field.
 function syncVertexEdit() {
-  const only = state.selected.size === 1 ? state.layers.get([...state.selected][0]) : null;
+  const only = state.selected.size === 1 && !state.bulk ? state.layers.get([...state.selected][0]) : null;
   const target = state.editing && !state.drawKind ? only : null;
   const current = state.vertexLayer;
   if (current && current !== target) {
@@ -942,7 +941,7 @@ function syncVertexEdit() {
     if (current.pm.enabled()) current.pm.disable();
   }
   if (target && current !== target) {
-    target.pm.enable({ ...SNAP, allowSelfIntersection: false, draggable: false });
+    target.pm.enable({ ...snapOpts(), allowSelfIntersection: false, draggable: false });
     target.on("pm:edit", onVertexEdit);
     target.bringToFront();
   }
@@ -1002,10 +1001,18 @@ function updateEditToolbar() {
   $("et-merge").lastChild.textContent = n >= 2 ? `Merge ${n}` : "Merge";
   $("et-delete").lastChild.textContent = n > 1 ? `Delete ${n}` : "Delete";
   $("et-undo").disabled = !(state.activeJob?.result.undo_depth > 0);
+  const total = state.geojson?.features.length ?? 0;
+  $("et-bulk").classList.toggle("active", !!state.bulk);
+  $("et-bulkbar").classList.toggle("hidden", !state.bulk);
+  $("et-bulk-discard").disabled = n < 1;
+  $("et-bulk-keep").disabled = n < 1 || n >= total;
+  $("et-bulk-discard").textContent = `Discard ${n} selected`;
+  $("et-bulk-keep").textContent = `Keep ${n} selected, discard the rest`;
   $("et-hint").textContent =
+    state.bulk ? `Bulk select: click every field you want to keep or discard (${n} selected), then press an OK button. Esc cancels.` :
     state.drawKind === "field" ? "Click to place vertices; click the first vertex to finish. Snaps to nearby fields. Esc cancels." :
     state.drawKind === "split" ? `Draw a line across ${n === 1 ? "the selected field" : "the fields to split"}; click the last point again to finish. Esc cancels.` :
-    n === 0 ? "Click a field to select it. Shift+click to select several. Esc to stop editing." :
+    n === 0 ? "Click a field to select it. Shift+click to select several, or use Bulk select. Esc to stop editing." :
     n === 1 ? "Drag a vertex to reshape, drag a midpoint to add one, right-click a vertex to remove it. Shift+click more fields to merge." :
     `${n} fields selected: merge or delete them.`;
 }
@@ -1017,12 +1024,32 @@ $("edit-toolbar").querySelector("[data-tool=split]").onclick = () => (state.draw
 $("et-merge").onclick = () => state.selected.size >= 2 && editRequest("/fields/merge", { field_ids: [...state.selected], avoid_overlap: avoidOverlap() });
 $("et-delete").onclick = () => state.selected.size && editRequest("/fields/delete", { field_ids: [...state.selected] });
 $("et-undo").onclick = () => editRequest("/fields/undo");
+
+function setBulk(on) {
+  state.bulk = on;
+  if (on) cancelDraw();
+  state.selected.clear();
+  refreshSelection();
+}
+$("et-bulk").onclick = () => setBulk(!state.bulk);
+$("et-bulk-cancel").onclick = () => setBulk(false);
+$("et-bulk-discard").onclick = async () => {
+  if (!state.selected.size) return;
+  if (await editRequest("/fields/delete", { field_ids: [...state.selected] })) setBulk(false);
+};
+$("et-bulk-keep").onclick = async () => {
+  const keep = state.selected;
+  const drop = state.geojson.features.map((f) => f.properties.field_id).filter((id) => !keep.has(id));
+  if (!keep.size || !drop.length) return;
+  if (await editRequest("/fields/delete", { field_ids: drop })) setBulk(false);
+};
 L.DomEvent.disableClickPropagation($("edit-toolbar"));
 
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input, select, textarea")) return;
   if (e.key === "Escape") {
     if (state.drawKind) cancelDraw();
+    else if (state.bulk) setBulk(false);
     else if (state.editing && state.selected.size) { state.selected.clear(); refreshSelection(); }
     else if (state.editing) setEditing(false);
     return;
@@ -1252,12 +1279,71 @@ async function init() {
 }
 
 // Easter egg: click the TU Delft / TAHMO logos 3 times for rainbow mode.
-// A short burst also plays whenever a run finishes.
 let rainbowTimer = null;
-function rainbow(ms) {
+let rainbowAudio = null;
+
+// 10 seconds of synthesized turbo dance music (150 BPM): four-on-the-floor kick,
+// off-beat hats, a driving sawtooth bass and a fast rising arpeggio.
+function playTurboDance(seconds) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  const ac = new Ctx();
+  const t0 = ac.currentTime + 0.05, end = t0 + seconds;
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0.5, t0);
+  master.gain.setValueAtTime(0.5, end - 0.3);
+  master.gain.linearRampToValueAtTime(0, end);
+  master.connect(ac.destination);
+
+  const beat = 60 / 150;
+  const noise = ac.createBuffer(1, ac.sampleRate * 0.2, ac.sampleRate);
+  noise.getChannelData(0).forEach((_, i, d) => { d[i] = Math.random() * 2 - 1; });
+
+  const tone = (type, freq, t, dur, vol, freqEnd) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + dur + 0.02);
+  };
+  const hat = (t, vol) => {
+    const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    s.buffer = noise; f.type = "highpass"; f.frequency.value = 7000;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    s.connect(f).connect(g).connect(master);
+    s.start(t); s.stop(t + 0.1);
+  };
+
+  const root = [55, 55, 65.41, 49];            // A1 A1 C2 G1, one per bar
+  const scale = [1, 1.2, 1.5, 1.8, 2, 2.4, 3, 2.4];   // minor arpeggio ratios
+  for (let b = 0, t = t0; t < end; b++, t += beat / 4) {
+    const step = b % 16, bar = Math.floor(b / 16) % 4;
+    if (step % 4 === 0) tone("sine", 160, t, 0.18, 1, 40);            // kick
+    if (step % 4 === 2) hat(t, 0.35);                                 // off-beat hat
+    if (step % 4 === 1 || step % 4 === 3) hat(t, 0.12);
+    if (step === 4 || step === 12) hat(t, 0.5);                       // clap-ish accent
+    if (step % 2 === 1) tone("sawtooth", root[bar], t, beat / 4, 0.28); // bass pulse
+    tone("square", root[bar] * 4 * scale[b % scale.length], t, beat / 5, 0.1); // arp
+  }
+  return ac;
+}
+
+function stopRainbow() {
   clearTimeout(rainbowTimer);
+  document.body.classList.remove("rainbow");
+  rainbowAudio?.close().catch(() => {});
+  rainbowAudio = null;
+}
+
+function rainbow(ms = 10000) {
+  stopRainbow();
   document.body.classList.add("rainbow");
-  if (ms) rainbowTimer = setTimeout(() => document.body.classList.remove("rainbow"), ms);
+  try { rainbowAudio = playTurboDance(ms / 1000); } catch (_) { rainbowAudio = null; }
+  rainbowTimer = setTimeout(stopRainbow, ms);
 }
 (() => {
   let clicks = 0, last = 0;
@@ -1267,10 +1353,8 @@ function rainbow(ms) {
     last = now;
     if (clicks >= 3) {
       clicks = 0;
-      if (document.body.classList.contains("rainbow")) {
-        clearTimeout(rainbowTimer);
-        document.body.classList.remove("rainbow");
-      } else rainbow(0);
+      if (document.body.classList.contains("rainbow")) stopRainbow();
+      else rainbow();
     }
   });
 })();

@@ -222,8 +222,13 @@ is going. When a run finishes, DelTool switches to *Results*.
    - *New field* (N): click the vertices, then click the first one to close
    - *Split* (S): draw a line across one or more fields
    - Shift+click several fields, then *Merge* (M). Gaps of up to 20 m are closed.
+   - *Bulk select*: click all the fields you want to keep or discard, then
+     press *Discard selected* or *Keep selected, discard the rest*
    - *Delete* (Del), *Undo* (Ctrl+Z, up to 30 steps)
-   - *No overlaps* clips new and edited fields against their neighbours.
+   - *No overlaps* (off by default) clips new and edited fields against their
+     neighbours. If that splits a shape, only the largest piece is kept.
+   - *Snap* (on by default) snaps vertices to nearby fields; switch it off if
+     the corners you click jump to other places.
 
    Every change is saved immediately. The field's `source` becomes `edited`,
    or `manual` for a drawn field. *QGIS* opens the field boundaries in a locally
