@@ -6,6 +6,30 @@ downloads the imagery (Scarlett pipeline), runs the fine-tuned
 (YOLO11x-seg, `DelAny/best_unfrozen.pt`) and shows the field polygons on the
 map, ready to export.
 
+> **Disclaimer: local, non-commercial use only.**
+> DelTool is a research and education tool, developed for the IFM4040 Joint
+> Interdisciplinary Project at TU Delft in collaboration with TAHMO. It is meant
+> to be run on your own computer, for non-commercial purposes.
+>
+> - **Imagery.** The satellite imagery comes from third-party providers (Google
+>   Satellite for the model input, Esri World Imagery for the basemap and in QGIS).
+>   It is not owned by the authors of DelTool and is not licensed with this
+>   software. It is fetched through public tile endpoints rather than a
+>   commercial imagery licence, so the providers' own terms of service apply
+>   and may restrict how it can be used. You are responsible for checking and
+>   following those terms.
+> - **No redistribution.** For that reason DelTool does not offer the imagery for
+>   download. Please do not share, publish or sell the imagery or the
+>   GeoTIFFs it creates. Do not use DelTool for bulk downloading of imagery or as
+>   part of a commercial product or service.
+> - **Model and outputs.** The model weights are subject to the licence of
+>   [Delineate-Anything](https://github.com/Lavreniuk/Delineate-Anything) and
+>   to any terms on the data used to fine-tune them. Check these before any use
+>   beyond research. Delineations are model estimates: check them before relying
+>   on them for decisions.
+> - **No warranty.** The software is provided as is, without warranty of any
+>   kind. The authors accept no liability for how it is used.
+
 ## Run
 
 Needs Python 3.10 or newer. On Windows, double-click `DelTool.bat`, or:
