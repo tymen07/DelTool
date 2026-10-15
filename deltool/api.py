@@ -434,6 +434,16 @@ def open_database_in_qgis(request: Request):
 
 
 # ---------------------------------------------------------------- frontend
+@app.middleware("http")
+async def revalidate_frontend(request: Request, call_next):
+    """Make the browser check for a newer index.html / app.js on every load, so
+    frontend changes show up after a normal reload instead of a stale cached copy."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=config.WEB_DIR / "static"), name="static")
 
 

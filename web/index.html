@@ -173,11 +173,11 @@
       <div class="toggles">
         <label class="switch"><span>Field outlines
           <i class="info" data-tip="Show or hide this run's fields on the map. Hover a field to highlight it."></i></span>
-          <input id="toggle-fields" type="checkbox" checked><i></i></label>
+          <input id="toggle-fields" type="checkbox" checked autocomplete="off"><i></i></label>
         <label class="switch"><span>Imagery seen by the model
           <i class="info" data-tip="Overlay the exact GeoTIFF (Google imagery, resampled to your resolution) that the model delineated, instead of the Esri basemap. Useful because imagery dates differ between providers."></i></span>
-          <input id="toggle-imagery" type="checkbox"><i></i></label>
-        <input id="imagery-opacity" class="hidden" type="range" min="0" max="1" step="0.05" value="1" title="Imagery opacity">
+          <input id="toggle-imagery" type="checkbox" checked autocomplete="off"><i></i></label>
+        <input id="imagery-opacity" type="range" min="0" max="1" step="0.05" value="1" title="Imagery opacity">
       </div>
 
       <h3>Edit fields

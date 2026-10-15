@@ -134,7 +134,8 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
 
 0. **Model & hardware**: pick the model and the compute device. The model
    used for the next run is shown at the top of the panel.
-1. **Area**: the map opens on Ghana. Click *Draw bounding box*, then click two
+1. **Area**: the map opens on Ghana, with place names and borders on (toggle
+   them with the button under the zoom control). Click *Draw bounding box*, then click two
    opposite corners on the map. You can also
    type W/S/E/N coordinates, and drag the box corners to adjust it. The panel
    shows the area, pixel size, UTM zone and an estimate of the run time.
@@ -150,9 +151,10 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
 5. **Results**: fields are drawn on the map. The *Minimum confidence*
    slider filters fields live; the model keeps everything above 0.05, so you
    can slide in both directions without re-running. Click a field for its
-   area, perimeter and confidence, or to delete it. You can overlay the exact imagery
-   the model saw, and *Re-filter* polygons by minimum area or simplification
-   without re-running the model.
+   area, perimeter and confidence, or to delete it. The exact imagery the model
+   saw is shown on top of the basemap (*Imagery seen by the model*, on by
+   default); switch it off to go back to the Esri basemap. *Re-filter* polygons by
+   minimum area or simplification without re-running the model.
 6. **Edit**: *Edit polygons* opens an edit toolbar on the map. You can do
    this as in QGIS, with snapping to neighbouring fields:
    - click a field and drag its vertices (drag a midpoint to add a vertex,

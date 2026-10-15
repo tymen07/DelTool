@@ -97,10 +97,9 @@ function setLabels(on) {
   on ? esriLabels.addTo(map) : map.removeLayer(esriLabels);
   $("btn-labels").classList.toggle("active", on);
   $("btn-labels").setAttribute("aria-pressed", on);
-  try { localStorage.setItem("deltool-labels", on ? "1" : "0"); } catch (_) {}
 }
 $("btn-labels").onclick = (e) => { e.preventDefault(); setLabels(!map.hasLayer(esriLabels)); };
-try { setLabels(localStorage.getItem("deltool-labels") === "1"); } catch (_) { setLabels(false); }
+setLabels(true);   // place names and borders are on whenever the page opens
 
 const CYAN = "#00A6D6", YELLOW = "#FFB81C", GREEN = "#6CC24A";
 const BBOX_STYLE = { color: "#ffffff", weight: 2, fill: false, dashArray: "8 6", interactive: false, snapIgnore: true };
