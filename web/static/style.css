@@ -429,8 +429,7 @@ summary .info { display: inline-grid; vertical-align: -3px; margin-left: 4px; }
 }
 .et-bulkbar { align-items: center; border-color: rgba(255,184,28,.55); }
 .et-group { display: flex; align-items: stretch; gap: 2px; padding: 0 6px; border-right: 1px solid var(--line); }
-.et-group:last-of-type { border-right: 0; }
-.et-dock > .primary { margin-left: 4px; }
+.et-group:last-child { border-right: 0; }
 .et-dock button, .et-bulkbar button {
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 58px;
   font: inherit; font-size: 11px; font-weight: 600; color: var(--text); background: transparent; border: 1px solid transparent;

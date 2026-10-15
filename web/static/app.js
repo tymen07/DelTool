@@ -278,6 +278,13 @@ map.on("pm:drawend", () => {
   updateEditToolbar();
 });
 
+// A split line is just two points: finish it as soon as the second one is placed.
+map.on("pm:vertexadded", (e) => {
+  if (state.drawKind !== "split" || (e.workingLayer?.getLatLngs().length ?? 0) < 2) return;
+  const draw = map.pm.Draw.Line;
+  setTimeout(() => state.drawKind === "split" && draw?._finishShape?.({}), 0);
+});
+
 map.on("pm:create", (e) => {
   const kind = state.createKind;
   state.createKind = null;
@@ -996,22 +1003,31 @@ function updateEditToolbar() {
   const tb = $("edit-toolbar");
   tb.querySelector("[data-tool=draw]").classList.toggle("active", state.drawKind === "field");
   tb.querySelector("[data-tool=split]").classList.toggle("active", state.drawKind === "split");
-  $("et-merge").disabled = n < 2;
+  $("et-merge").disabled = false;
   $("et-delete").disabled = n < 1;
   $("et-merge").lastChild.textContent = n >= 2 ? `Merge ${n}` : "Merge";
   $("et-delete").lastChild.textContent = n > 1 ? `Delete ${n}` : "Delete";
   $("et-undo").disabled = !(state.activeJob?.result.undo_depth > 0);
+  $("et-redo").disabled = !(state.activeJob?.result.redo_depth > 0);
   const total = state.geojson?.features.length ?? 0;
-  $("et-bulk").classList.toggle("active", !!state.bulk);
+  const merging = !!state.bulk && state.bulkKind === "merge";
+  $("et-bulk").classList.toggle("active", !!state.bulk && !merging);
+  $("et-merge").classList.toggle("active", merging);
   $("et-bulkbar").classList.toggle("hidden", !state.bulk);
+  $("et-bulk-discard").classList.toggle("hidden", merging);
+  $("et-bulk-keep").classList.toggle("hidden", merging);
+  $("et-bulk-merge").classList.toggle("hidden", !merging);
+  $("et-bulk-merge").disabled = n < 2;
+  $("et-bulk-merge").textContent = n >= 2 ? `Merge ${n} fields` : "Merge selected";
   $("et-bulk-discard").disabled = n < 1;
   $("et-bulk-keep").disabled = n < 1 || n >= total;
   $("et-bulk-discard").textContent = `Discard ${n} selected`;
   $("et-bulk-keep").textContent = `Keep ${n} selected, discard the rest`;
   $("et-hint").textContent =
+    merging ? `Merge: click the fields you want to join (${n} selected), then press Merge. Esc cancels.` :
     state.bulk ? `Bulk select: click every field you want to keep or discard (${n} selected), then press an OK button. Esc cancels.` :
     state.drawKind === "field" ? "Click to place vertices; click the first vertex to finish. Snaps to nearby fields. Esc cancels." :
-    state.drawKind === "split" ? `Draw a line across ${n === 1 ? "the selected field" : "the fields to split"}; click the last point again to finish. Esc cancels.` :
+    state.drawKind === "split" ? `Click two points to draw a line across ${n === 1 ? "the selected field" : "the fields to split"}; it splits as soon as you place the second. Esc cancels.` :
     n === 0 ? "" :
     n === 1 ? "Drag a vertex to reshape, drag a midpoint to add one, right-click a vertex to remove it. Shift+click more fields to merge." :
     `${n} fields selected: merge or delete them.`;
@@ -1021,17 +1037,29 @@ $("btn-edit").onclick = () => setEditing(!state.editing);
 $("et-done").onclick = () => setEditing(false);
 $("edit-toolbar").querySelector("[data-tool=draw]").onclick = () => (state.drawKind === "field" ? cancelDraw() : startDraw("field"));
 $("edit-toolbar").querySelector("[data-tool=split]").onclick = () => (state.drawKind === "split" ? cancelDraw() : startDraw("split"));
-$("et-merge").onclick = () => state.selected.size >= 2 && editRequest("/fields/merge", { field_ids: [...state.selected], avoid_overlap: avoidOverlap() });
+const mergeSelected = () => editRequest("/fields/merge", { field_ids: [...state.selected], avoid_overlap: avoidOverlap() });
+// With two or more fields selected, Merge joins them right away. Otherwise it
+// starts a merge mode where you click the fields to join, then confirm.
+$("et-merge").onclick = () => {
+  if (state.bulk && state.bulkKind === "merge") setBulk(false);
+  else if (!state.bulk && state.selected.size >= 2) mergeSelected();
+  else setBulk(true, "merge");
+};
+$("et-bulk-merge").onclick = async () => {
+  if (state.selected.size >= 2 && await mergeSelected()) setBulk(false);
+};
 $("et-delete").onclick = () => state.selected.size && editRequest("/fields/delete", { field_ids: [...state.selected] });
 $("et-undo").onclick = () => editRequest("/fields/undo");
+$("et-redo").onclick = () => editRequest("/fields/redo");
 
-function setBulk(on) {
+function setBulk(on, kind = "select") {
   state.bulk = on;
+  state.bulkKind = on ? kind : null;
   if (on) cancelDraw();
   state.selected.clear();
   refreshSelection();
 }
-$("et-bulk").onclick = () => setBulk(!state.bulk);
+$("et-bulk").onclick = () => setBulk(!(state.bulk && state.bulkKind === "select"), "select");
 $("et-bulk-cancel").onclick = () => setBulk(false);
 $("et-bulk-discard").onclick = async () => {
   if (!state.selected.size) return;
@@ -1056,7 +1084,9 @@ document.addEventListener("keydown", (e) => {
   }
   if (!state.editing) return;
   const key = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && key === "z") { e.preventDefault(); $("et-undo").click(); }
+  if ((e.ctrlKey || e.metaKey) && key === "z" && e.shiftKey) { e.preventDefault(); $("et-redo").click(); }
+  else if ((e.ctrlKey || e.metaKey) && key === "y") { e.preventDefault(); $("et-redo").click(); }
+  else if ((e.ctrlKey || e.metaKey) && key === "z") { e.preventDefault(); $("et-undo").click(); }
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); $("et-delete").click(); }
   else if (e.ctrlKey || e.metaKey || e.altKey) return;
   else if (key === "n") startDraw("field");

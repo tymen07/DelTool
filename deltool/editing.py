@@ -3,7 +3,7 @@ delete fields, with an undo history.
 
 The browser sends WGS84 GeoJSON. Edits are done in the run's UTM CRS so areas
 stay metric. Before every change fields.gpkg is copied to edits/<n>.gpkg so
-the change can be undone.
+the change can be undone (undone states go to redo/).
 """
 
 import os
@@ -22,6 +22,7 @@ from deltool.config import EDIT_HISTORY_LIMIT
 from deltool.pipeline import FIELDS_FILE, load_fields, save_fields
 
 HISTORY_DIR = "edits"
+REDO_DIR = "redo"
 MIN_PART_M2 = 1.0                    # smaller pieces are dropped as slivers
 MERGE_GAP_STEPS_M = (1, 3, 6, 10)    # gaps closed when merging fields that don't touch
 
@@ -35,26 +36,50 @@ def _history(run_dir: Path):
     return sorted((run_dir / HISTORY_DIR).glob("*.gpkg"), key=lambda p: int(p.stem))
 
 
-def snapshot(run_dir: Path):
-    """Keep a copy of the current fields so the next change can be undone."""
-    hist_dir = run_dir / HISTORY_DIR
+def _redo_files(run_dir: Path):
+    return sorted((run_dir / REDO_DIR).glob("*.gpkg"), key=lambda p: int(p.stem))
+
+
+def _push(run_dir: Path, dirname: str, existing):
+    """Copy the current fields into a numbered history folder."""
+    hist_dir = run_dir / dirname
     hist_dir.mkdir(exist_ok=True)
-    existing = _history(run_dir)
     n = int(existing[-1].stem) + 1 if existing else 1
     shutil.copy2(run_dir / FIELDS_FILE, hist_dir / f"{n}.gpkg")
     for old in existing[: max(0, len(existing) + 1 - EDIT_HISTORY_LIMIT)]:
         old.unlink(missing_ok=True)
 
 
+def snapshot(run_dir: Path):
+    """Keep a copy of the current fields so the next change can be undone.
+    A new change also clears what could be redone."""
+    _push(run_dir, HISTORY_DIR, _history(run_dir))
+    shutil.rmtree(run_dir / REDO_DIR, ignore_errors=True)
+
+
 def undo_depth(run_dir: Path) -> int:
     return len(_history(run_dir))
+
+
+def redo_depth(run_dir: Path) -> int:
+    return len(_redo_files(run_dir))
 
 
 def undo(run_dir: Path) -> gpd.GeoDataFrame:
     history = _history(run_dir)
     if not history:
         raise EditError("Nothing to undo.")
+    _push(run_dir, REDO_DIR, _redo_files(run_dir))
     os.replace(history[-1], run_dir / FIELDS_FILE)
+    return load_fields(run_dir)
+
+
+def redo(run_dir: Path) -> gpd.GeoDataFrame:
+    redos = _redo_files(run_dir)
+    if not redos:
+        raise EditError("Nothing to redo.")
+    _push(run_dir, HISTORY_DIR, _history(run_dir))
+    os.replace(redos[-1], run_dir / FIELDS_FILE)
     return load_fields(run_dir)
 
 

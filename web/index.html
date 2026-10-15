@@ -310,6 +310,7 @@
   <div id="et-bulkbar" class="et-bulkbar hidden">
     <button id="et-bulk-discard" class="danger">Discard 0 selected</button>
     <button id="et-bulk-keep" class="primary">Keep 0 selected, discard the rest</button>
+    <button id="et-bulk-merge" class="primary hidden">Merge selected</button>
     <button id="et-bulk-cancel">Cancel</button>
   </div>
   <div class="et-dock">
@@ -318,18 +319,20 @@
         <svg viewBox="0 0 20 20"><path d="M3 15l4-11 9 4-3 8z"/></svg><span>New field</span></button>
       <button data-tool="split" title="Draw a line across fields to split them (S)">
         <svg viewBox="0 0 20 20"><path d="M3 4h14v12H3z"/><path d="M8 1.5l4 17" stroke-dasharray="2 1.5"/></svg><span>Split</span></button>
+      <button id="et-merge" title="Merge the selected fields (M)">
+        <svg viewBox="0 0 20 20"><path d="M2 5h6v10H2zM12 5h6v10h-6z"/><path d="M7 10h6"/></svg><span>Merge</span></button>
     </div>
     <div class="et-group">
       <button id="et-bulk" title="Click many fields, then keep or discard them all at once">
         <svg viewBox="0 0 20 20"><path d="M3 3h6v6H3zM11 11h6v6h-6z"/><path d="M12 4l2 2 3-3"/></svg><span>Bulk select</span></button>
-      <button id="et-merge" title="Merge the selected fields (M)">
-        <svg viewBox="0 0 20 20"><path d="M2 5h6v10H2zM12 5h6v10h-6z"/><path d="M7 10h6"/></svg><span>Merge</span></button>
       <button id="et-delete" class="danger" title="Delete the selected fields (Del)">
         <svg viewBox="0 0 20 20"><path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11"/></svg><span>Delete</span></button>
     </div>
     <div class="et-group">
       <button id="et-undo" title="Undo the last change (Ctrl+Z)">
         <svg viewBox="0 0 20 20"><path d="M7 4L3 8l4 4"/><path d="M3 8h9a4.5 4.5 0 010 9H9"/></svg><span>Undo</span></button>
+      <button id="et-redo" title="Redo the undone change (Ctrl+Y)">
+        <svg viewBox="0 0 20 20"><path d="M13 4l4 4-4 4"/><path d="M17 8H8a4.5 4.5 0 000 9h3"/></svg><span>Redo</span></button>
     </div>
     <div class="et-group et-options">
       <label class="et-switch" title="Clip new and edited fields so they don't overlap their neighbours">
@@ -337,8 +340,10 @@
       <label class="et-switch" title="Snap vertices to nearby fields while drawing and editing">
         <input id="et-snap" type="checkbox" checked><i></i>Snap</label>
     </div>
-    <button id="et-done" class="primary" title="Stop editing (Esc)">
-      <svg viewBox="0 0 20 20"><path d="M4 10.5l4 4 8-9"/></svg><span>Done</span></button>
+    <div class="et-group">
+      <button id="et-done" class="primary" title="Stop editing (Esc)">
+        <svg viewBox="0 0 20 20"><path d="M4 10.5l4 4 8-9"/></svg><span>Done</span></button>
+    </div>
   </div>
 </div>
 <div id="toasts" aria-live="polite"></div>

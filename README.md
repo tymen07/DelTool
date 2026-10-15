@@ -220,11 +220,12 @@ is going. When a run finishes, DelTool switches to *Results*.
    - click a field and drag its vertices (drag a midpoint to add a vertex,
      right-click a vertex to remove it)
    - *New field* (N): click the vertices, then click the first one to close
-   - *Split* (S): draw a line across one or more fields
-   - Shift+click several fields, then *Merge* (M). Gaps of up to 20 m are closed.
+   - *Split* (S): click two points to cut across one or more fields
+   - *Merge* (M): shift+click several fields and press it, or press it first,
+     click the fields to join and press *Merge N fields*. Gaps of up to 20 m are closed.
    - *Bulk select*: click all the fields you want to keep or discard, then
      press *Discard selected* or *Keep selected, discard the rest*
-   - *Delete* (Del), *Undo* (Ctrl+Z, up to 30 steps)
+   - *Delete* (Del), *Undo* (Ctrl+Z, up to 30 steps) and *Redo* (Ctrl+Y or Ctrl+Shift+Z)
    - *No overlaps* (off by default) clips new and edited fields against their
      neighbours. If that splits a shape, only the largest piece is kept.
    - *Snap* (on by default) snaps vertices to nearby fields; switch it off if

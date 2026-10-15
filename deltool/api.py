@@ -125,7 +125,8 @@ def _local_only(request: Request):
 
 
 def _edited(job, fields):
-    job.result.update(_fields_summary(fields), edited=_now(), undo_depth=editing.undo_depth(job.dir))
+    job.result.update(_fields_summary(fields), edited=_now(), undo_depth=editing.undo_depth(job.dir),
+                   redo_depth=editing.redo_depth(job.dir))
     jobs.save(job)
 
 
@@ -302,6 +303,17 @@ def undo_edit(job_id: str):
     with _edit_lock:
         try:
             fields = editing.undo(job.dir)
+        except editing.EditError as exc:
+            raise HTTPException(400, str(exc))
+        return _full_reload(job, fields)
+
+
+@app.post("/api/jobs/{job_id}/fields/redo")
+def redo_edit(job_id: str):
+    job = _done_job(job_id)
+    with _edit_lock:
+        try:
+            fields = editing.redo(job.dir)
         except editing.EditError as exc:
             raise HTTPException(400, str(exc))
         return _full_reload(job, fields)
