@@ -114,7 +114,7 @@ def _check_environment():
     failed = [c for c in checks if not c["ok"] and not c.get("optional")]
     if failed:
         _status.update(state="error", message="Missing: " + "; ".join(f"{c['name']} ({c['detail']})" for c in failed)
-                       + ". Restart with python run.py to install missing packages.")
+                       + ". Start DelTool with python run.py to install or download what is missing.")
     return not failed
 
 

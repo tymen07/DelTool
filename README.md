@@ -30,19 +30,51 @@ map, ready to export.
 > - **No warranty.** The software is provided as is, without warranty of any
 >   kind. The authors accept no liability for how it is used.
 
+## Before you start
+
+You only need these. DelTool installs everything else (PyTorch, GeoPandas and
+so on) by itself, after asking you.
+
+| What | Why | How to get it |
+|---|---|---|
+| **Python 3.10 or newer** (3.12 is tested) | Runs DelTool. `venv` and `pip` come with it and are used to set up DelTool's own environment. | https://www.python.org/downloads/ |
+| **Internet connection** | Installs the packages once and downloads the satellite imagery for each run. | |
+| **About 5 GB free disk space** | The Python environment is about 1 GB with the CPU version of PyTorch, and about 4.5 GB with GPU support. | |
+| **The model weights** (~120 MB each) | Not stored in git. `python run.py` offers to download them into the `DelAny` folder, so you don't have to do anything. | Automatic |
+| **A modern browser** | The interface runs in your browser: Chrome, Edge, Firefox or Safari. | |
+
+Optional:
+
+- **An NVIDIA GPU** with a recent driver (version 527.41 or newer on Windows) makes
+  runs about 10–40× faster. Without one DelTool runs on the CPU. See *GPU*.
+- **QGIS** (https://qgis.org) for the *QGIS* button. Without it everything else
+  works.
+
+**Windows:** in the Python installer, tick **Add python.exe to PATH** (and keep
+**pip** ticked). Then it just works.
+**Linux:** on Ubuntu/Debian, `venv` and `pip` are separate packages:
+`sudo apt install python3 python3-venv python3-pip`.
+**macOS:** install Python from python.org, and use `python3` instead of `python`
+in the commands below.
+
+If something is missing, DelTool says so when you start it and tells you
+what to install.
+
 ## Run
 
-Needs Python 3.10 or newer. On Windows, double-click `DelTool.bat`, or:
+Needs Python 3.10 or newer (see above). On Windows, double-click `DelTool.bat`, or:
 
 ```bash
 python run.py            # opens http://127.0.0.1:8000
 ```
 
-The first start creates a Python environment in `.venv/` and installs
-everything from `requirements.txt` into it. PyTorch comes from the CUDA package
-index when an NVIDIA GPU is found. This takes a few minutes and needs internet.
-Later starts only install what is missing, for example after
-`requirements.txt` changes.
+The first start asks "Create it and install the packages now? [Y/n]". If you
+agree (press Enter), it creates a Python environment in `.venv/` and installs
+everything from `requirements.txt` into it. This takes a few minutes and needs
+internet. If you answer `n`, nothing is installed. Later starts only install
+what is missing (after asking), for example after `requirements.txt` changes.
+If you have an NVIDIA GPU with a recent driver, it also asks before downloading
+the GPU build of PyTorch (about 2.5 GB).
 
 Options: `--port 8080`, `--host 0.0.0.0` (expose on LAN), `--no-browser`,
 `--no-venv` (install into and run with the current Python instead of `.venv/`).
@@ -63,7 +95,10 @@ automatically if a GPU-enabled PyTorch is installed, otherwise on CPU (about
 | **DelAny v2 · Fine-tuned** (recommended) | `DelAny/best_unfrozen.pt` | Smallholder / irregular fields on ~1 m imagery |
 | **DelAny v2 · Baseline** | `DelAny/DelineateAnythingv2.pt` ([download](https://huggingface.co/MykolaL/DelineateAnything/resolve/main/DelineateAnythingv2.pt?download=true)) | Large, regular (mechanised) fields |
 
-Both are YOLO11x-seg models that take 512 px tiles. To add another model, add an
+Both are YOLO11x-seg models that take 512 px tiles. If a weights file is not in
+`DelAny/`, `python run.py` offers to download it (both from Hugging Face: the fine-tuned model from
+[jimmyoe/ghana-fine-tuned-del-any-v2](https://huggingface.co/jimmyoe/ghana-fine-tuned-del-any-v2)) and checks it
+against a SHA-256 checksum. The baseline is optional. To add another model, add an
 entry to `MODELS` in `deltool/config.py`. The default model is loaded at startup;
 other models load the first time you use them and then stay in memory.
 

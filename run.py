@@ -6,6 +6,7 @@ and then starts the server from it. Later starts only install what is missing.
 """
 
 import argparse
+import importlib.util
 import socket
 import subprocess
 import sys
@@ -13,7 +14,8 @@ import threading
 import time
 import webbrowser
 
-from deltool import environment
+from deltool import environment, weights
+from deltool.config import DEFAULT_MODEL
 
 
 def open_when_ready(host, port, url, timeout=60):
@@ -29,13 +31,45 @@ def open_when_ready(host, port, url, timeout=60):
             time.sleep(0.2)
 
 
-def ask(question):
-    """Yes/no in the console. Enter means yes. Without a console (EOF) it means no."""
+def ask(question, default=True):
+    """Yes/no in the console. Enter picks the default. Without a console (EOF) it means no."""
     try:
-        answer = input(f"{question} [Y/n] ").strip().lower()
+        answer = input(f"{question} [{'Y/n' if default else 'y/N'}] ").strip().lower()
     except EOFError:
         return False
-    return answer in ("", "y", "yes")
+    return default if answer == "" else answer in ("y", "yes")
+
+
+def fetch_missing_weights():
+    """Offer to download model weights that are not in DelAny/. The default
+    (fine-tuned) model is needed to run; the baseline is optional."""
+    for key, spec in weights.missing():
+        required = key == DEFAULT_MODEL
+        print(f"The {spec['short']} model weights are missing "
+              f"({weights.size_mb(spec)} MB, {'needed to run DelTool' if required else 'optional'}).")
+        if not ask(f"Download {spec['short']} now?", default=required):
+            if required:
+                sys.exit("Stopped: DelTool needs the fine-tuned weights. Put best_unfrozen.pt in the "
+                         "DelAny folder, or start again to download it.")
+            continue
+        try:
+            weights.download(spec)
+        except weights.DownloadError as exc:
+            if required:
+                sys.exit(f"{exc}\nYou can also copy best_unfrozen.pt into the DelAny folder by hand.")
+            print(f"Skipped the {spec['short']} model: {exc}")
+
+
+def check_python_tools(no_venv):
+    """venv and pip ship with Python, but Debian/Ubuntu split them into extra
+    packages. Say what to install instead of failing with a traceback."""
+    needed = ["pip"] if no_venv or environment.in_other_env() or environment.in_project_venv() else ["venv", "ensurepip"]
+    missing = [m for m in needed if importlib.util.find_spec(m) is None]
+    if missing:
+        hint = ("On Ubuntu/Debian: sudo apt install python3-venv python3-pip"
+                if sys.platform.startswith("linux") else
+                "Reinstall Python from https://www.python.org/downloads/ and keep 'pip' ticked")
+        sys.exit(f"This Python is missing: {', '.join(missing)}. {hint}")
 
 
 def restart_in_venv():
@@ -64,7 +98,8 @@ def main():
     args = parser.parse_args()
 
     if sys.version_info < (3, 10):
-        sys.exit("DelTool needs Python 3.10 or newer.")
+        sys.exit("DelTool needs Python 3.10 or newer: https://www.python.org/downloads/")
+    check_python_tools(args.no_venv)
     if not (args.no_venv or environment.in_project_venv() or environment.in_other_env()):
         restart_in_venv()
 
@@ -97,6 +132,8 @@ def main():
               "Start without --no-venv to get GPU support automatically, or see README › GPU.")
     elif message := environment.gpu_message():
         print(message)
+
+    fetch_missing_weights()
 
     import uvicorn
 

@@ -4,6 +4,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Weights are not in git. `python run.py` offers to download a missing file from
+# download_url and checks it against size_bytes and sha256.
+# The fine-tuned weights are a file in this Hugging Face model repository.
+HF_WEIGHTS_REPO = "jimmyoe/ghana-fine-tuned-del-any-v2"
+
 # Delineate-Anything (YOLO11x-seg) weights. Both models take 512 px tiles.
 MODELS = {
     "finetuned": {
@@ -11,6 +16,9 @@ MODELS = {
         "short": "Fine-tuned",
         "path": PROJECT_ROOT / "DelAny" / "best_unfrozen.pt",
         "recommended": True,
+        "download_url": f"https://huggingface.co/{HF_WEIGHTS_REPO}/resolve/main/best_trained_on_ghana_viedia_unfrozen.pt?download=true",
+        "size_bytes": 124746970,
+        "sha256": "160bc6f26474d577215d7cf29f0987fb5716512d9f6cf4d7366b7bb1d29fe9aa",
         "tagline": "Small fields",
         "description": "Delineate-Anything v2 fine-tuned on our own labelled imagery of "
                        "smallholder fields. Best choice for small, irregular fields on "
@@ -25,8 +33,10 @@ MODELS = {
         "description": "Original Delineate-Anything v2 weights (Lavreniuk et al.), trained "
                        "on 0.25–10 m imagery worldwide. Better suited to large, regular "
                        "(mechanised) fields; tends to miss or merge small fields.",
-        "source_url": "https://huggingface.co/MykolaL/DelineateAnything/resolve/main/"
-                      "DelineateAnythingv2.pt?download=true",
+        "download_url": "https://huggingface.co/MykolaL/DelineateAnything/resolve/main/"
+                        "DelineateAnythingv2.pt?download=true",
+        "size_bytes": 124747297,
+        "sha256": "46700b8a279b07922953a11adaeb5e658d9a2384b6334c8e0a3090886218915a",
     },
 }
 DEFAULT_MODEL = "finetuned"
