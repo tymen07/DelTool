@@ -49,14 +49,14 @@ def fetch_missing_weights():
               f"({weights.size_mb(spec)} MB, {'needed to run DelTool' if required else 'optional'}).")
         if not ask(f"Download {spec['short']} now?", default=required):
             if required:
-                sys.exit("Stopped: DelTool needs the fine-tuned weights. Put best_unfrozen.pt in the "
+                sys.exit(f"Stopped: DelTool needs the fine-tuned weights. Put {spec['path'].name} in the "
                          "DelAny folder, or start again to download it.")
             continue
         try:
             weights.download(spec)
         except weights.DownloadError as exc:
             if required:
-                sys.exit(f"{exc}\nYou can also copy best_unfrozen.pt into the DelAny folder by hand.")
+                sys.exit(f"{exc}\nYou can also copy {spec['path'].name} into the DelAny folder by hand.")
             print(f"Skipped the {spec['short']} model: {exc}")
 
 

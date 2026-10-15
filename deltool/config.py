@@ -14,7 +14,7 @@ MODELS = {
     "finetuned": {
         "name": "DelAny v2 · Fine-tuned",
         "short": "Fine-tuned",
-        "path": PROJECT_ROOT / "DelAny" / "best_unfrozen.pt",
+        "path": PROJECT_ROOT / "DelAny" / "best_trained_on_ghana_viedia_unfrozen.pt",
         "recommended": True,
         "download_url": f"https://huggingface.co/{HF_WEIGHTS_REPO}/resolve/main/best_trained_on_ghana_viedia_unfrozen.pt?download=true",
         "size_bytes": 124746970,

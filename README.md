@@ -3,8 +3,8 @@
 Draw a bounding box on Esri World Imagery, pick a resolution, and DelTool
 downloads the imagery (Scarlett pipeline), runs the fine-tuned
 [Delineate-Anything](https://github.com/Lavreniuk/Delineate-Anything) model
-(YOLO11x-seg, `DelAny/best_unfrozen.pt`) and shows the field polygons on the
-map, ready to export.
+(YOLO11x-seg, `DelAny/best_trained_on_ghana_viedia_unfrozen.pt`) and shows the
+field polygons on the map, ready to export.
 
 > **Disclaimer: local, non-commercial use only.**
 > DelTool is a research and education tool, developed for the IFM4040 Joint
@@ -92,7 +92,7 @@ automatically if a GPU-enabled PyTorch is installed, otherwise on CPU (about
 
 | Model | Weights | Use for |
 |---|---|---|
-| **DelAny v2 · Fine-tuned** (recommended) | `DelAny/best_unfrozen.pt` | Smallholder / irregular fields on ~1 m imagery |
+| **DelAny v2 · Fine-tuned** (recommended) | `DelAny/best_trained_on_ghana_viedia_unfrozen.pt` ([download](https://huggingface.co/jimmyoe/ghana-fine-tuned-del-any-v2/resolve/main/best_trained_on_ghana_viedia_unfrozen.pt?download=true)) | Smallholder / irregular fields on ~1 m imagery |
 | **DelAny v2 · Baseline** | `DelAny/DelineateAnythingv2.pt` ([download](https://huggingface.co/MykolaL/DelineateAnything/resolve/main/DelineateAnythingv2.pt?download=true)) | Large, regular (mechanised) fields |
 
 Both are YOLO11x-seg models that take 512 px tiles. If a weights file is not in
@@ -221,7 +221,9 @@ web/
   static/loader.js         startup loading screen (field animation + model status)
   static/style.css         TU Delft themed styling
 DelTool.bat                Windows launcher (double-click)
-DelAny/best_unfrozen.pt    fine-tuned model weights
+DelAny/                   model weights, downloaded by run.py (not in git):
+  best_trained_on_ghana_viedia_unfrozen.pt   fine-tuned
+  DelineateAnythingv2.pt                     baseline (optional)
 Tiffany/Scarlett V7.py     original standalone imagery script (reference)
 outputs/<run id>/          per run: mosaic_utm.tif, labels.tif, fields.gpkg, job.json,
                            edits/ (undo history), qgis/ (copies opened in QGIS)
