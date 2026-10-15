@@ -64,7 +64,7 @@ TILE_SOURCES = {
 }
 DEFAULT_TILE_SOURCE = "google"
 
-RESOLUTION_CHOICES_M = [0.3, 0.5, 1, 2, 3, 5, 10]
+RESOLUTION_CHOICES_M = [0.3, 1, 2, 3, 5, 10]
 DEFAULT_RESOLUTION_M = 1.0
 
 # Safety limit on the final UTM raster size (width * height pixels).
