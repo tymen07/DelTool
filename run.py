@@ -29,8 +29,22 @@ def open_when_ready(host, port, url, timeout=60):
             time.sleep(0.2)
 
 
+def ask(question):
+    """Yes/no in the console. Enter means yes. Without a console (EOF) it means no."""
+    try:
+        answer = input(f"{question} [Y/n] ").strip().lower()
+    except EOFError:
+        return False
+    return answer in ("", "y", "yes")
+
+
 def restart_in_venv():
     """Re-run this script with the project's .venv Python."""
+    if not environment.venv_python().exists():
+        print("DelTool needs its own Python environment in .venv/ (about 1 GB of packages).")
+        if not ask("Create it and install the packages now?"):
+            sys.exit("Stopped: nothing was installed. Start again when you are ready, "
+                     "or use --no-venv to use your current Python.")
     python = environment.ensure_venv()
     proc = subprocess.Popen([str(python), __file__, *sys.argv[1:]])
     while True:
@@ -56,10 +70,11 @@ def main():
 
     missing = environment.missing_requirements()
     if missing:
-        if len(missing) == len(environment.requirements()):
-            print(f"First start: setting up DelTool's own Python environment in {sys.prefix}.\n"
-                  "This happens once and takes a few minutes; later starts skip it.")
-        print(f"Installing {len(missing)} missing package(s) into {sys.prefix}")
+        names = ", ".join(environment._name(l) for l in missing)
+        print(f"Missing in {sys.prefix}: {names}")
+        if not ask("Install them now?"):
+            sys.exit("Stopped: DelTool can't run without these packages. "
+                     "Start again when you are ready to install them.")
         try:
             environment.install(missing)
         except subprocess.CalledProcessError as exc:
@@ -68,10 +83,15 @@ def main():
     # Use the GPU when possible: swap a CPU-only PyTorch for the CUDA build.
     # Only in DelTool's own .venv; another Python environment is left alone.
     if environment.wants_cuda_torch() and environment.in_project_venv():
-        try:
-            environment.switch_to_cuda_torch()
-        except subprocess.CalledProcessError as exc:
-            print(f"Could not install GPU support ({exc}); running on CPU.")
+        print(f"{environment.nvidia_gpu()['name']} found, but PyTorch is CPU-only. "
+              "The GPU build is about 2.5 GB to download.")
+        if ask("Install GPU support now?"):
+            try:
+                environment.switch_to_cuda_torch()
+            except subprocess.CalledProcessError as exc:
+                print(f"Could not install GPU support ({exc}); running on CPU.")
+        else:
+            print("Running on CPU. Start again to be asked about GPU support.")
     elif environment.wants_cuda_torch():
         print(f"{environment.nvidia_gpu()['name']} found, but this Python has a CPU-only PyTorch. "
               "Start without --no-venv to get GPU support automatically, or see README › GPU.")

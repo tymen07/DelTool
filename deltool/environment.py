@@ -218,16 +218,11 @@ def install(lines, log=print):
 
 # ------------------------------------------------------ warm-up check
 def check_runtime(progress=lambda msg: None):
-    """Install anything missing, then import every key package. Returns
-    [{name, ok, detail}] for the loading screen."""
+    """Import every key package and report which ones are missing. Nothing is
+    installed here: run.py asks the user first."""
     missing = missing_requirements()
     if missing:
-        progress(f"Installing missing packages: {', '.join(_name(l) for l in missing)}")
-        try:
-            install(missing, log=progress)
-        except (OSError, subprocess.CalledProcessError) as exc:
-            progress(f"Installing packages failed: {exc}")
-        importlib.invalidate_caches()
+        progress(f"Missing packages: {', '.join(_name(l) for l in missing)}. Start with python run.py to install them.")
 
     checks = []
     for i, (label, module) in enumerate(RUNTIME_IMPORTS, 1):
