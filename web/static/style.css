@@ -574,3 +574,4 @@ body.rainbow .leaflet-container, body.rainbow #map { animation: rb-hue 2s linear
 .et-dock { order: 1; }
 .et-bulkbar { order: 2; }
 .et-hint { order: 3; }
+#edit-toolbar:not(.busy) .et-hint:empty { display: none; }

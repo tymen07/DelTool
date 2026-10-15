@@ -1012,7 +1012,7 @@ function updateEditToolbar() {
     state.bulk ? `Bulk select: click every field you want to keep or discard (${n} selected), then press an OK button. Esc cancels.` :
     state.drawKind === "field" ? "Click to place vertices; click the first vertex to finish. Snaps to nearby fields. Esc cancels." :
     state.drawKind === "split" ? `Draw a line across ${n === 1 ? "the selected field" : "the fields to split"}; click the last point again to finish. Esc cancels.` :
-    n === 0 ? "Click a field to select it. Shift+click to select several, or use Bulk select. Esc to stop editing." :
+    n === 0 ? "" :
     n === 1 ? "Drag a vertex to reshape, drag a midpoint to add one, right-click a vertex to remove it. Shift+click more fields to merge." :
     `${n} fields selected: merge or delete them.`;
 }
