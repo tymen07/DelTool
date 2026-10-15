@@ -41,9 +41,24 @@ class RunParams:
     batch_size: int = config.DEFAULT_BATCH_SIZE
     min_area_m2: float = config.DEFAULT_MIN_FIELD_AREA_M2
     simplify_m: float = config.DEFAULT_SIMPLIFY_M
+    # Esri Wayback only: the version to download, the deepest zoom its capture
+    # is served at, and the capture it shows (recorded with the run).
+    wayback_release: int | None = None
+    max_zoom: int | None = None
+    imagery_date: str = ""
+    imagery_label: str = ""
 
     def to_dict(self):
         return asdict(self)
+
+
+def imagery_info(params):
+    """Where the imagery came from and when it was captured (if known)."""
+    p = params if isinstance(params, dict) else params.to_dict()
+    source = p.get("source") or config.DEFAULT_TILE_SOURCE
+    return {"source": source, "source_label": config.TILE_SOURCES[source]["label"],
+            "date": p.get("imagery_date") or None, "label": p.get("imagery_label") or "",
+            "release": p.get("wayback_release")}
 
 
 def _stage_reporter(report, stage):
@@ -96,7 +111,8 @@ def run_pipeline(params: RunParams, run_dir: Path, report):
 
     report("imagery", 0.0, "Planning imagery download")
     mosaic = build_mosaic(params.bbox, params.resolution_m, run_dir, params.source,
-                          progress=_stage_reporter(report, "imagery"))
+                          progress=_stage_reporter(report, "imagery"),
+                          release=params.wayback_release, max_zoom=params.max_zoom)
 
     report("inference", STAGES["inference"][0],
            f"Running {config.MODELS[params.model]['name']}")
@@ -120,6 +136,7 @@ def run_pipeline(params: RunParams, run_dir: Path, report):
             "total_tiles": mosaic.total_tiles, "preview_bounds": mosaic.preview_bounds,
         },
         "model": params.model,
+        "imagery": imagery_info(params),
         "device": resolve_device(params.device),
         "field_count": int(len(fields)),
         "total_area_ha": round(float(fields["area_ha"].sum()), 2) if len(fields) else 0.0,

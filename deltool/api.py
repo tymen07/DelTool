@@ -7,17 +7,18 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import geopandas as gpd
+import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from deltool import config, database, editing, qgis
+from deltool import config, editing, qgis
 from deltool.delineation import model as model_loader
 from deltool.export import FORMATS, export_fields
-from deltool.imagery import plan_mosaic
+from deltool.imagery import plan_mosaic, wayback
 from deltool.jobs import JobManager
-from deltool.pipeline import RunParams, load_fields, postprocess
+from deltool.pipeline import RunParams, imagery_info, load_fields, postprocess
 
 
 
@@ -39,6 +40,8 @@ class BBoxRequest(BaseModel):
     bbox: list[float] = Field(..., description="[west, south, east, north] in WGS84")
     resolution_m: float = Field(config.DEFAULT_RESOLUTION_M, gt=0, le=100)
     source: str = config.DEFAULT_TILE_SOURCE
+    wayback_release: int | None = None                 # Esri Wayback version to download
+    max_zoom: int | None = Field(None, ge=0, le=22)    # deepest zoom the chosen capture is served at
 
     @field_validator("bbox")
     @classmethod
@@ -57,6 +60,8 @@ class JobRequest(BBoxRequest):
     batch_size: int = Field(config.DEFAULT_BATCH_SIZE, ge=1, le=64)
     min_area_m2: float = Field(config.DEFAULT_MIN_FIELD_AREA_M2, ge=0)
     simplify_m: float = Field(config.DEFAULT_SIMPLIFY_M, ge=0)
+    imagery_date: str = Field("", max_length=20)       # capture date of the chosen Wayback imagery
+    imagery_label: str = Field("", max_length=200)
 
 
 class PostprocessRequest(BaseModel):
@@ -85,10 +90,8 @@ def _now():
     return datetime.now().isoformat(timespec="seconds")
 
 
-def _public(job, saved=None):
-    """Job as JSON, plus when it was last saved to the field database."""
-    saved = database.saved_runs() if saved is None else saved
-    return job.public() | {"in_database": saved.get(job.id)}
+def _public(job):
+    return job.public()
 
 
 def _job_or_404(job_id):
@@ -145,11 +148,6 @@ def _full_reload(job, fields):
     return {"job": _public(job), "all": _geojson(fields), "select": []}
 
 
-def _export_crs(crs, fields):
-    """'utm' for fields from several runs means the UTM zone of their centre."""
-    return fields.estimate_utm_crs().to_string() if crs == "utm" and len(fields) else crs
-
-
 # ------------------------------------------------------------------- routes
 @app.get("/api/status")
 def get_status():
@@ -186,7 +184,7 @@ def get_config():
 def plan(req: BBoxRequest, overlap: float = config.DEFAULT_TILE_OVERLAP):
     """Size estimate for a bbox before running anything."""
     try:
-        p = plan_mosaic(tuple(req.bbox), req.resolution_m, req.source)
+        p = plan_mosaic(tuple(req.bbox), req.resolution_m, req.source, req.max_zoom)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     step = max(1, round(config.MODEL_TILE_PX * (1 - overlap)))
@@ -200,7 +198,6 @@ def plan(req: BBoxRequest, overlap: float = config.DEFAULT_TILE_OVERLAP):
         "model_tiles": n_windows(p["width"]) * n_windows(p["height"]),
         "area_km2": round(p["pixels"] * req.resolution_m ** 2 / 1e6, 3),
         "too_large": p["pixels"] > config.MAX_OUTPUT_PIXELS,
-        "database": database.count_in_bbox(req.bbox),
     }
 
 
@@ -209,6 +206,8 @@ def plan(req: BBoxRequest, overlap: float = config.DEFAULT_TILE_OVERLAP):
 def create_job(req: JobRequest):
     if req.source not in config.TILE_SOURCES:
         raise HTTPException(400, f"Unknown tile source '{req.source}'")
+    if req.source == "wayback" and not req.wayback_release:
+        raise HTTPException(400, "Pick an imagery date for Esri Wayback first.")
     if req.model not in config.MODELS or not config.MODELS[req.model]["path"].exists():
         raise HTTPException(400, f"Model '{req.model}' is not available")
     if req.device == "cuda" and not model_loader.devices()["cuda_available"]:
@@ -220,13 +219,12 @@ def create_job(req: JobRequest):
 
 @app.get("/api/jobs")
 def list_jobs():
-    saved = database.saved_runs()
-    return [_public(j, saved) for j in jobs.list()]
+    return [_public(j) for j in jobs.list()]
 
 
 @app.delete("/api/jobs")
 def delete_all_jobs():
-    """Delete every run (except a running one). Saved database fields stay."""
+    """Delete every run (except a running one)."""
     deleted, skipped = jobs.delete_all()
     return {"deleted": len(deleted), "skipped": len(skipped)}
 
@@ -325,9 +323,98 @@ def export(job_id: str, format: str = "gpkg", crs: str = "utm", min_confidence: 
         raise HTTPException(400, f"Unsupported format '{format}'")
     fields = load_fields(job.dir)
     fields = fields[fields["confidence"] >= min_confidence]
+    imagery = imagery_info(job.params)
+    fields = fields.assign(imagery_source=imagery["source_label"], imagery_date=imagery["date"] or "unknown")
     basename = f"{job.name}_fields".replace(" ", "_")
     path = export_fields(fields, format, crs, job.dir / "exports", basename)
     return FileResponse(path, filename=path.name, media_type="application/octet-stream")
+
+
+@app.get("/api/export")
+def export_many(ids: str, format: str = "gpkg", crs: str = "utm", min_confidence: float = 0.0):
+    """Fields of several runs in one file, with the run each field came from.
+    ids is a comma-separated list of run ids."""
+    if format not in FORMATS:
+        raise HTTPException(400, f"Unsupported format '{format}'")
+    selected = [_done_job(i) for i in dict.fromkeys(ids.split(",")) if i]
+    if not selected:
+        raise HTTPException(400, "Select at least one finished run.")
+    parts = []
+    for job in selected:
+        fields = load_fields(job.dir)
+        fields = fields[fields["confidence"] >= min_confidence]
+        imagery = imagery_info(job.params)
+        parts.append(fields.assign(run_id=job.id, run_name=job.name, imagery_source=imagery["source_label"],
+                                   imagery_date=imagery["date"] or "unknown"))
+    if crs.lower() == "utm" and len({str(p.crs) for p in parts}) > 1 and format not in ("kml", "geojson"):
+        raise HTTPException(400, "These runs lie in different UTM zones. Export them in WGS84 or Web Mercator instead.")
+    target_crs = parts[0].crs
+    fields = gpd.GeoDataFrame(pd.concat([p.to_crs(target_crs) for p in parts], ignore_index=True), crs=target_crs)
+    basename = f"{len(selected)}_runs_fields_{datetime.now():%Y%m%d-%H%M%S}"
+    path = export_fields(fields, format, crs, config.CACHE_DIR / "exports", basename)
+    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
+
+
+# ------------------------------------------------------------------- Wayback
+class WaybackRequest(BBoxRequest):
+    source: str = "wayback"
+
+
+_wayback_tasks: dict[str, dict] = {}
+_wayback_lock = threading.Lock()
+
+
+@app.post("/api/wayback")
+def wayback_dates(req: WaybackRequest):
+    """Start (or return the cached result of) looking up the Wayback imagery
+    dates for a box. The first lookup for a box takes 10 to 40 s, so it runs
+    in the background: poll GET /api/wayback/{id} until status is done."""
+    try:
+        zoom = plan_mosaic(tuple(req.bbox), req.resolution_m, "wayback")["zoom"]
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    bbox = tuple(req.bbox)
+    task_id = "_".join(f"{v:.5f}" for v in bbox) + f"_z{zoom}"
+    if (result := wayback.cached(bbox, zoom)) is not None:
+        return {"id": task_id, "status": "done", "progress": 1.0, "message": "", "result": result}
+    with _wayback_lock:
+        task = _wayback_tasks.get(task_id)
+        if task and task["status"] in ("running", "done"):
+            return task
+        task = _wayback_tasks[task_id] = {"id": task_id, "status": "running", "progress": 0.0,
+                                          "message": "Looking up imagery dates", "result": None}
+
+    def work():
+        def progress(frac, msg):
+            task.update(progress=round(frac, 3), message=msg)
+        try:
+            task.update(result=wayback.candidates(bbox, zoom, progress), status="done", progress=1.0)
+        except (wayback.WaybackError, ValueError) as exc:
+            task.update(status="failed", message=str(exc))
+        except Exception as exc:  # noqa: BLE001 - shown in the panel
+            task.update(status="failed", message=f"Looking up imagery dates failed: {exc}")
+
+    threading.Thread(target=work, daemon=True, name="wayback-lookup").start()
+    return task
+
+
+@app.post("/api/wayback/forget")
+def wayback_forget(req: WaybackRequest):
+    """Drop the cached lookup for a box, so the next one asks Esri again."""
+    zoom = plan_mosaic(tuple(req.bbox), req.resolution_m, "wayback")["zoom"]
+    wayback.forget(tuple(req.bbox), zoom)
+    task_id = "_".join(f"{v:.5f}" for v in req.bbox) + f"_z{zoom}"
+    with _wayback_lock:
+        _wayback_tasks.pop(task_id, None)
+    return {"ok": True}
+
+
+@app.get("/api/wayback/{task_id}")
+def wayback_task(task_id: str):
+    task = _wayback_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(404, "Unknown lookup; start it again.")
+    return task
 
 
 # ---------------------------------------------------------------------- QGIS
@@ -367,72 +454,6 @@ def import_from_qgis(job_id: str):
         return _full_reload(job, fields)
 
 
-# ------------------------------------------------------------------ database
-@app.get("/api/database")
-def get_database():
-    return database.summary()
-
-
-@app.post("/api/jobs/{job_id}/database")
-def save_to_database(job_id: str, min_confidence: float = 0.0):
-    """Save the run's fields (above the confidence slider) to the database,
-    replacing an earlier save of the same run."""
-    job = _done_job(job_id)
-    fields = load_fields(job.dir)
-    fields = fields[fields["confidence"] >= min_confidence]
-    entry, overlap = database.save_run(job, fields, min_confidence)
-    return {"job": _public(job), "entry": entry, "overlap": overlap}
-
-
-@app.delete("/api/database/{run_id}")
-def remove_from_database(run_id: str):
-    if not database.delete_run(run_id):
-        raise HTTPException(404, "Run is not in the database")
-    return {"deleted": run_id}
-
-
-@app.get("/api/database/fields")
-def database_fields(bbox: str, exclude: str = "", limit: int = 5000):
-    try:
-        box = [float(v) for v in bbox.split(",")]
-        assert len(box) == 4
-    except (ValueError, AssertionError):
-        raise HTTPException(400, "bbox must be west,south,east,north")
-    fields = database.fields_in_bbox(box, exclude_run=exclude or None, limit=limit + 1)
-    truncated = len(fields) > limit
-    out = json.loads(fields.iloc[:limit].to_json(drop_id=True))
-    out["truncated"] = truncated
-    return out
-
-
-def _database_export_path(format, crs):
-    fields = database.fields_in_bbox()
-    if not len(fields):
-        raise HTTPException(400, "The database is empty. Save a run to it first.")
-    out_dir = config.DATABASE_PATH.parent / "exports"
-    return export_fields(fields, format, _export_crs(crs, fields), out_dir,
-                         f"deltool_database_{datetime.now():%Y%m%d_%H%M%S}")
-
-
-@app.get("/api/database/export")
-def export_database(format: str = "gpkg", crs: str = "EPSG:4326"):
-    if format not in FORMATS:
-        raise HTTPException(400, f"Unsupported format '{format}'")
-    path = _database_export_path(format, crs)
-    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
-
-
-@app.post("/api/database/qgis")
-def open_database_in_qgis(request: Request):
-    _local_only(request)
-    path = _database_export_path("gpkg", "EPSG:4326")
-    try:
-        qgis.open_fields(path, "DelTool saved fields")
-    except RuntimeError as exc:
-        raise HTTPException(400, str(exc))
-    return {"opened": str(path)}
-
-
 # ---------------------------------------------------------------- frontend
 @app.middleware("http")
 async def revalidate_frontend(request: Request, call_next):
@@ -445,6 +466,11 @@ async def revalidate_frontend(request: Request, call_next):
 
 
 app.mount("/static", StaticFiles(directory=config.WEB_DIR / "static"), name="static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return FileResponse(config.WEB_DIR / "static" / "favicon.svg", media_type="image/svg+xml")
 
 
 @app.get("/")

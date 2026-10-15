@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DelTool · Field Delineation</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Slab:wght@500;700&display=swap" rel="stylesheet">
@@ -54,24 +55,19 @@
     <span class="am-tag" id="active-model-tag"></span>
   </div>
 
-  <div class="scroll">
-    <!-- 1. Model -->
-    <section class="card">
-      <h2><span class="step">1</span>Model &amp; hardware
-        <i class="info" data-tip="Which model? Use Fine-tuned (recommended) for smallholder fields on ~1 m imagery. Use Baseline only for large, regular fields (roughly > 5 ha): it tends to merge or miss small plots. Not sure? Run both on the same box and compare them under Previous runs. Both are Delineate-Anything v2 (YOLO11x instance segmentation, 512 px tiles); only their training data differs."></i>
-      </h2>
-      <div id="model-options" class="model-options" role="radiogroup"></div>
-      <label class="device-label"><span class="lbl">Compute device
-        <i class="info" data-tip="Where the model runs. GPU (NVIDIA CUDA) is typically 10–40× faster than CPU. Auto picks the GPU when PyTorch can use one."></i></span>
-        <div class="seg seg3" id="device"></div>
-      </label>
-      <div id="device-hint" class="device-hint hidden"></div>
-    </section>
+  <nav class="tabs" role="tablist" aria-label="Steps">
+    <button type="button" role="tab" data-tab="area"><span class="tab-num">1</span>Area<i class="tab-state" id="tab-state-area"></i></button>
+    <button type="button" role="tab" data-tab="imagery"><span class="tab-num">2</span>Imagery<i class="tab-state" id="tab-state-imagery"></i></button>
+    <button type="button" role="tab" data-tab="run"><span class="tab-num">3</span>Run<i class="tab-state" id="tab-state-run"></i></button>
+    <button type="button" role="tab" data-tab="results"><span class="tab-num">4</span>Results<span class="tab-count" id="tab-runs-count"></span></button>
+  </nav>
 
-    <!-- 2. Area -->
+  <div class="scroll">
+    <!-- ======================================================= 1. Area -->
+    <div class="tab-pane" data-pane="area" role="tabpanel">
     <section class="card">
-      <h2><span class="step">2</span>Area of interest
-        <i class="info" data-tip="Click Draw bounding box, then click two opposite corners on the map. Imagery is downloaded for exactly this box and the model delineates all fields inside it. Drag the corner handles to adjust, or type the coordinates (WGS84 degrees). If fields in this area are already saved in the field database, that is shown below."></i>
+      <h2>Area of interest
+        <i class="info" data-tip="Click Draw bounding box, then click two opposite corners on the map. Imagery is downloaded for exactly this box and the model delineates all fields inside it. Drag the corner handles to adjust, or type the coordinates (WGS84 degrees)."></i>
       </h2>
       <div class="row">
         <button id="btn-draw" class="btn btn-outline grow" title="Click two opposite corners on the map">
@@ -93,23 +89,59 @@
       </div>
       <div id="plan-info" class="plan muted">Draw a box on the map to start.</div>
     </section>
+    <button type="button" class="btn btn-outline btn-block next-step" data-goto="imagery">Next: imagery →</button>
+    </div>
 
-    <!-- 3. Imagery -->
+    <!-- ==================================================== 2. Imagery -->
+    <div class="tab-pane" data-pane="imagery" role="tabpanel">
     <section class="card">
-      <h2><span class="step">3</span>Imagery
-        <i class="info" data-tip="Imagery is downloaded from Google Satellite for the box and saved as a GeoTIFF in UTM. The Esri basemap on the map is only for display; the two can show different dates."></i></h2>
-      <label>
+      <h2>Imagery
+        <i class="info" data-tip="Imagery is downloaded for the box and saved as a GeoTIFF in UTM, which the model then delineates. Choose where it comes from: Google's latest imagery, or a dated version from Esri Wayback so you control the season."></i></h2>
+      <span class="lbl">Source
+        <i class="info" data-tip="Google (the Scarlett pipeline): sharp, recent imagery, but you can't choose or see when it was taken. Esri Wayback: Esri's archive of dated imagery (2014 to now). You pick the capture date, so you can avoid dry-season or hazy images; DelTool recommends the date with the clearest field boundaries."></i></span>
+      <div class="seg seg-src" id="imagery-source" role="radiogroup">
+        <button type="button" data-src="google">Google<small>latest, date unknown</small></button>
+        <button type="button" data-src="wayback">Esri Wayback<small>choose the date</small></button>
+      </div>
+      <label id="resolution-label">
         <span class="lbl">Resolution
-          <i class="info" data-tip="Ground size of one pixel in the GeoTIFF the model sees. Finer (smaller) = more detail but more pixels, longer downloads and longer inference. The model tile is 512 px, so at 1 m one tile covers 512 × 512 m."></i>
+          <i class="info" data-tip="Ground size of one pixel in the GeoTIFF the model sees. The models were trained on ~1 m imagery and work best close to that: at much finer resolutions fields look larger than the model is used to and outlines get ragged. Finer also means more pixels, longer downloads and longer inference. The model tile is 512 px, so at 1 m one tile covers 512 × 512 m. For Esri Wayback, a resolution finer than the chosen date offers uses that date's finest detail."></i>
         </span>
         <div class="seg" id="resolution"></div>
         <input id="resolution-custom" type="number" step="0.1" min="0.1" placeholder="Custom (m/px)" title="Any other resolution in metres per pixel">
       </label>
+      <p class="source-note">Imagery from Google and Esri, used under their terms of service:
+        for research and education only, not for commercial use. See the note at the bottom of the panel.</p>
+      <div id="wayback-panel" class="hidden">
+        <div class="lbl">Imagery date
+          <i class="info" data-tip="The capture dates available for your box, best first. The score combines how sharp and contrasted a preview of the box looks (compared with the other dates), the season of the capture (end of the rainy season and harvest usually show boundaries best; dry-season Harmattan haze worst), the detail available and the age of the image. The run downloads the chosen date in full detail and resamples it to the resolution above. Check the preview on the map before running."></i>
+          <label class="mini-check" title="Show the selected date on the map"><input id="wayback-preview" type="checkbox" checked>Show on map</label>
+        </div>
+        <div id="wayback-status" class="wb-status">Draw a box to see the available dates.</div>
+        <ul id="wayback-list" class="wb-list"></ul>
+        <div id="wayback-res" class="wb-res"></div>
+        <button id="wayback-more" class="btn btn-ghost btn-sm btn-block hidden" type="button"></button>
+      </div>
+    </section>
+    <button type="button" class="btn btn-outline btn-block next-step" data-goto="run">Next: run →</button>
+    </div>
+
+    <!-- ======================================================== 3. Run -->
+    <div class="tab-pane" data-pane="run" role="tabpanel">
+    <section class="card">
+      <h2>Model &amp; hardware
+        <i class="info" data-tip="Which model? Use Fine-tuned (recommended) for smallholder fields on ~1 m imagery. Use Baseline only for large, regular fields (roughly > 5 ha): it tends to merge or miss small plots. Not sure? Run both on the same box and compare them under Results. Both are Delineate-Anything v2 (YOLO11x instance segmentation, 512 px tiles); only their training data differs."></i>
+      </h2>
+      <div id="model-options" class="model-options" role="radiogroup"></div>
+      <label class="device-label"><span class="lbl">Compute device
+        <i class="info" data-tip="Where the model runs. GPU (NVIDIA CUDA) is typically 10–40× faster than CPU. Auto picks the GPU when PyTorch can use one."></i></span>
+        <div class="seg seg3" id="device"></div>
+      </label>
+      <div id="device-hint" class="device-hint hidden"></div>
     </section>
 
-    <!-- 4. Post-processing -->
     <section class="card">
-      <h2><span class="step">4</span>Post-processing
+      <h2>Post-processing
         <i class="info" data-tip="How the model output is turned into polygons. You can change these afterwards under Results › Re-filter, without running the model again."></i></h2>
       <div class="grid2">
         <label><span class="lbl">Min field area (m²)
@@ -133,17 +165,17 @@
       </details>
     </section>
 
-    <!-- 5. Run -->
     <section class="card">
-      <h2><span class="step">5</span>Run
-        <i class="info" data-tip="The run works in the background: you can keep using the map, and cancel it at any time. Runs are queued and processed one at a time. Results are kept under Previous runs, also after a restart."></i></h2>
+      <h2>Run
+        <i class="info" data-tip="The run works in the background: you can keep using the map, and cancel it at any time. Runs are queued and processed one at a time. Results are kept under Results › Previous runs, also after a restart."></i></h2>
       <label><span class="lbl">Run name <span class="muted">(optional)</span>
-        <i class="info" data-tip="Used in the run list, the field database and export file names. Defaults to the date and time."></i></span>
+        <i class="info" data-tip="Used in the run list and export file names. Defaults to the date and time."></i></span>
         <input id="run-name" placeholder="e.g. Tamale_north"></label>
       <button id="btn-generate" class="btn btn-primary" disabled>
         <svg viewBox="0 0 20 20"><path d="M6 4 L16 10 L6 16 Z"/></svg>
         Generate fields
       </button>
+      <div id="generate-hint" class="generate-hint hidden"></div>
       <div id="progress" class="hidden">
         <ol class="stepper">
           <li data-stage="imagery">Imagery</li>
@@ -157,13 +189,15 @@
         </div>
       </div>
     </section>
+    </div>
 
-    <!-- 6. Results -->
+    <!-- ==================================================== 4. Results -->
+    <div class="tab-pane" data-pane="results" role="tabpanel">
+    <div id="results-empty" class="empty-note">No run selected. Start one under <a href="#" data-goto="run">Run</a>, or pick a previous run below.</div>
     <section id="results" class="card card-accent hidden">
-      <h2><span class="step">6</span>Results <span id="result-name" class="result-name"></span>
-        <i class="info" data-tip="Fields of the selected run. Click a field on the map for its area, perimeter and confidence. Use Edit polygons to correct the shapes, and Save to database to keep them in the field database."></i></h2>
+      <h2>Results <span id="result-name" class="result-name"></span>
+        <i class="info" data-tip="Fields of the selected run. Click a field on the map for its area, perimeter and confidence. Use Edit polygons to correct the shapes."></i></h2>
       <div id="result-stats" class="stats"></div>
-
       <label class="conf">
         <span class="lbl">Minimum confidence <output id="confidence-val"></output>
           <i class="info" data-tip="Model confidence (0–1) per field. Only fields with confidence ≥ this value are shown and exported. Slide to filter live — no re-run needed. 0.15 is the Delineate-Anything default."></i></span>
@@ -175,7 +209,7 @@
           <i class="info" data-tip="Show or hide this run's fields on the map. Hover a field to highlight it."></i></span>
           <input id="toggle-fields" type="checkbox" checked autocomplete="off"><i></i></label>
         <label class="switch"><span>Imagery seen by the model
-          <i class="info" data-tip="Overlay the exact GeoTIFF (Google imagery, resampled to your resolution) that the model delineated, instead of the Esri basemap. Useful because imagery dates differ between providers."></i></span>
+          <i class="info" data-tip="Overlay the exact GeoTIFF the model delineated (Google or Esri Wayback imagery, resampled to your resolution) instead of the basemap. Useful because imagery dates differ between sources."></i></span>
           <input id="toggle-imagery" type="checkbox" checked autocomplete="off"><i></i></label>
         <input id="imagery-opacity" type="range" min="0" max="1" step="0.05" value="1" title="Imagery opacity">
       </div>
@@ -219,48 +253,32 @@
         </select>
       </div>
       <button id="btn-export" class="btn btn-primary">Download fields</button>
-
-      <h3>Field database
-        <i class="info" data-tip="Saves the fields shown (above the minimum confidence), including your edits, to the field database. Saving the same run again updates it. Saved fields are kept when the run itself is deleted."></i></h3>
-      <button id="btn-db-save" class="btn btn-outline btn-block">
-        <svg viewBox="0 0 20 20"><ellipse cx="10" cy="5" rx="6" ry="2.5"/><path d="M4 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5M4 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5"/></svg>
-        <span>Save to database</span>
-      </button>
     </section>
 
-    <!-- History -->
     <section class="card">
       <h2>Previous runs
-        <i class="info" data-tip="All runs on this computer, newest first. Click one to show its results. DB marks runs saved to the field database. Deleting a run removes its files (imagery and model output), not its saved database fields."></i>
+        <i class="info" data-tip="All runs on this computer, newest first. Click one to show its results. Tick several finished runs to download their fields together in one file. Deleting a run removes its files (imagery, model output and fields)."></i>
         <button id="btn-delete-all" class="btn btn-ghost-danger btn-sm push hidden" title="Delete all runs and their files">Delete all</button>
       </h2>
       <ul id="job-list"></ul>
-    </section>
-
-    <section class="card" id="db-card">
-      <h2>Field database
-        <i class="info" data-tip="All fields you saved from earlier runs, in one database (database/deltool.sqlite). Show them on the map to see which areas were already delineated, export them together, or open them in QGIS."></i>
-        <span id="db-summary" class="result-name"></span>
-      </h2>
-      <label class="switch"><span>Show saved fields on map
-        <i class="info" data-tip="Draws the saved fields of other runs as green dashed outlines, for the area in view. Click one to see which run it comes from."></i></span>
-        <input id="toggle-db" type="checkbox"><i></i></label>
-      <ul id="db-list"></ul>
-      <div id="db-export" class="hidden">
+      <div id="runs-export" class="runs-export hidden">
+        <div class="row between">
+          <b id="runs-sel-count"></b>
+          <span class="small"><a href="#" id="runs-sel-all">Select all</a> · <a href="#" id="runs-sel-clear">Clear</a></span>
+        </div>
         <div class="grid2">
-          <select id="db-format"></select>
-          <select id="db-crs">
-            <option value="EPSG:4326">WGS84 · EPSG:4326</option>
+          <select id="runs-format"></select>
+          <select id="runs-crs">
             <option value="utm">UTM (metric)</option>
+            <option value="EPSG:4326">WGS84 · EPSG:4326</option>
             <option value="EPSG:3857">Web Mercator · EPSG:3857</option>
           </select>
         </div>
-        <div class="row">
-          <button id="btn-db-export" class="btn btn-outline grow">Export all saved fields</button>
-          <button id="btn-db-qgis" class="btn btn-outline" title="Open all saved fields in QGIS">QGIS</button>
-        </div>
+        <button id="btn-export-runs" class="btn btn-primary btn-block">Download fields</button>
+        <div id="runs-export-note" class="muted small"></div>
       </div>
     </section>
+    </div>
 
     <footer class="credits">
       <div class="credit-logos">
@@ -268,7 +286,19 @@
       </div>
       <p>Developed at <b>Delft University of Technology</b> (IFM4040 Joint Interdisciplinary Project)
         in collaboration with <b>TAHMO</b>, the Trans-African Hydro-Meteorological Observatory.</p>
-      <p class="muted">Models: Delineate-Anything v2 (Lavreniuk et al.), baseline and fine-tuned. Imagery: Google Satellite. Basemap: Esri World Imagery.</p>
+      <p class="muted">Developed by Tymen van Beuningen, Risa Deshwal, Jimmy Oei and Vlad Parau.</p>
+      <p class="muted">Models: Delineate-Anything v2 (Lavreniuk et al.), baseline and fine-tuned.<br>
+        Imagery: Google Satellite and Esri World Imagery Wayback.<br>
+        Basemap: Esri World Imagery.</p>
+      <details class="disclaimer">
+        <summary>Disclaimer: research and education only, not for commercial use.</summary>
+        Imagery © Google and © Esri and their providers (Maxar, Airbus and others). It is fetched from
+        their public tile services without a commercial licence, so their terms of service apply.
+        Google's terms do not allow bulk downloading of tiles or creating datasets from them, even for
+        non-commercial use. Don't share, publish or sell the imagery or GeoTIFFs, and use licensed
+        imagery for anything beyond a research prototype. Delineations are model estimates: check them
+        before relying on them. Provided as is, without warranty.
+      </details>
     </footer>
   </div>
 </aside>

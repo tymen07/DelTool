@@ -12,12 +12,19 @@ field polygons on the map, ready to export.
 > to be run on your own computer, for non-commercial purposes.
 >
 > - **Imagery.** The satellite imagery comes from third-party providers (Google
->   Satellite for the model input, Esri World Imagery for the basemap and in QGIS).
+>   Satellite or Esri World Imagery Wayback for the model input, Esri World
+>   Imagery for the basemap and in QGIS).
 >   It is not owned by the authors of DelTool and is not licensed with this
 >   software. It is fetched through public tile endpoints rather than a
 >   commercial imagery licence, so the providers' own terms of service apply
 >   and may restrict how it can be used. You are responsible for checking and
->   following those terms.
+>   following those terms. In particular, the Google Maps Platform terms do not
+>   allow bulk downloading of tiles or creating datasets from Google Maps
+>   content (such as tracing or digitising it), and they make no exception for
+>   non-commercial use. Esri World Imagery is licensed under Esri's Master
+>   License Agreement, and Esri provides a separate layer for exporting tiles.
+>   Using these endpoints this way is tolerated at best, not permitted. For any
+>   use beyond a student or research prototype, use licensed imagery.
 > - **No redistribution.** For that reason DelTool does not offer the imagery for
 >   download. Please do not share, publish or sell the imagery or the
 >   GeoTIFFs it creates. Do not use DelTool for bulk downloading of imagery or as
@@ -102,6 +109,44 @@ against a SHA-256 checksum. The baseline is optional. To add another model, add 
 entry to `MODELS` in `deltool/config.py`. The default model is loaded at startup;
 other models load the first time you use them and then stay in memory.
 
+## Imagery source and date
+
+The season of the imagery matters: in the dry season fields are bare and
+brown and the Harmattan haze blurs everything, so boundaries are harder to see
+than at the end of the rainy season. Under *Imagery › Source* you can choose:
+
+- **Google** (the Scarlett pipeline): sharp and recent, but Google gives no way
+  to choose, or even see, when the imagery was taken.
+- **Esri Wayback**: Esri's archive of every version of its World Imagery
+  basemap since 2014 (0.3–0.5 m, Maxar/Vantor and Airbus satellites), each
+  with the capture date. After you draw a box, DelTool lists the capture
+  dates available there, best first. The first lookup for an area takes up to
+  half a minute; after that it is instant.
+
+Each date gets a score (0–100) for how clearly field boundaries are likely to
+show, with the reasons listed:
+
+- **The image itself (45%)**: a ~1.2 m preview of the box is compared with
+  the other dates for edge sharpness, contrast, colour variation (green against
+  brown), haze and cloud.
+- **Season (30%)**: from the regional crop calendar at that latitude. In
+  northern Ghana, the end of the rainy season and the harvest
+  (September–November) score highest, and the Harmattan dry season
+  (December–March) lowest. Southern Ghana has two rainy seasons.
+- **Detail (25%)**: the capture resolution, and the deepest zoom Esri serves
+  it at. Some older captures only go to ~1.2 m.
+- Images older than 5 years and boxes only partly covered score lower.
+
+Esri republishes the basemap every few weeks, so an area often appears in
+many versions that show the same capture. DelTool lists each capture once
+(e.g. "12 Esri versions changed this area; they show 3 different captures")
+and shows its acquisition date only, not the date Esri published it.
+
+The best date is marked *Recommended* and selected; *Show on map* previews the
+selected date so you can check it yourself. The run records the capture date,
+and it is shown in the results, the run list, the exports (`imagery_source`,
+`imagery_date`).
+
 ## GPU
 
 The *Compute device* picker (Auto / GPU / CPU) uses an NVIDIA GPU when
@@ -132,6 +177,13 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
 
 ## Workflow
 
+The panel has four tabs, one per step: **1 Area** (draw the box),
+**2 Imagery** (source, resolution or date), **3 Run** (model, compute device,
+post-processing, *Generate*) and **4 Results** (the selected run's fields,
+editing and export, plus all previous runs). A dot on a tab shows its state:
+green when done, yellow when something is still needed, pulsing while a run
+is going. When a run finishes, DelTool switches to *Results*.
+
 0. **Model & hardware**: pick the model and the compute device. The model
    used for the next run is shown at the top of the panel.
 1. **Area**: the map opens on Ghana, with place names and borders on (toggle
@@ -139,10 +191,14 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
    opposite corners on the map. You can also
    type W/S/E/N coordinates, and drag the box corners to adjust it. The panel
    shows the area, pixel size, UTM zone and an estimate of the run time.
-2. **Imagery**: pick the resolution (m/pixel). Imagery is downloaded from
-   Google Satellite. The Esri World Imagery basemap is only used for display.
-   The resolution sets both the download zoom level and the GeoTIFF pixel size
-   the model runs on.
+2. **Imagery**: pick the source (see *Imagery source and date*) and the
+   resolution (m/pixel): it sets both the download zoom level and the GeoTIFF
+   pixel size the model runs on. Keep it close to 1 m: the models were trained
+   on ~1 m imagery, and at finer resolutions (e.g. Esri's 0.6 m) fields look
+   larger than the model is used to and the outlines become ragged. For Esri
+   Wayback the date is downloaded in full detail and resampled to this
+   resolution (a resolution finer than the date offers uses the date's finest
+   detail). The basemap on the map is only for display.
 3. **Post-processing**: set the minimum field area and the simplification.
    Tile overlap, NMS IoU and batch size are under *Advanced*. Hover over or click the
    (i) icons for an explanation of each parameter.
@@ -154,7 +210,11 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
    area, perimeter and confidence, or to delete it. The exact imagery the model
    saw is shown on top of the basemap (*Imagery seen by the model*, on by
    default); switch it off to go back to the Esri basemap. *Re-filter* polygons by
-   minimum area or simplification without re-running the model.
+   minimum area or simplification without re-running the model. The run's
+   imagery and fields are only on the map in the *Results* tab, so the other
+   tabs show the plain basemap. Under *Previous runs*, tick several runs to
+   download their fields together in one file (with `run_name` and `run_id`
+   columns).
 6. **Edit**: *Edit polygons* opens an edit toolbar on the map. You can do
    this as in QGIS, with snapping to neighbouring fields:
    - click a field and drag its vertices (drag a midpoint to add a vertex,
@@ -175,26 +235,9 @@ cards. With 4 GB of VRAM, use a batch size of about 4.
    (WKT), in UTM, WGS84 or Web Mercator. The imagery GeoTIFF stays on the
    server: it is used for the run but can't be downloaded.
 
-Earlier runs are listed under *Previous runs* and kept across restarts. A run
+Earlier runs are listed under *Results › Previous runs* and kept across restarts. A run
 can be linked directly with `http://127.0.0.1:8000/?run=<run id>`. *Delete
 all* removes every run and its files, except a run that is still running.
-
-## Field database
-
-*Save to database* (under Results) stores the fields shown, including edits,
-in `database/deltool.sqlite`. This is one database for all runs. Saving the
-same run again replaces it. Saved fields are kept when you delete the run.
-
-- *Show saved fields on map* draws the saved fields of other runs as green
-  dashed outlines, so you can see which areas were already delineated.
-- When you draw a box, the panel shows how many saved fields are already in
-  that area.
-- When you save, DelTool reports which saved fields of other runs overlap
-  the new ones.
-- *Export all saved fields* (GeoPackage, GeoJSON, Shapefile, KML, FlatGeobuf
-  or CSV), or open them all in QGIS. Each field has `run_id`, `run_name`,
-  `field_id`, `area_ha`, `perimeter_m`, `confidence`, `source`, `model` and
-  `saved`.
 
 ## Structure
 
@@ -206,22 +249,24 @@ deltool/
   jobs.py                  background job queue, job.json persistence
   pipeline.py              bbox -> imagery -> model -> polygons
   editing.py               reshape / draw / merge / split / delete fields, undo
-  database.py              SQLite field database of saved runs
   qgis.py                  find and open a local QGIS
+  weights.py               download + checksum missing model weights
   environment.py           .venv creation, package check and install
   export.py                GPKG / GeoJSON / SHP / KML / FGB / CSV export
   imagery/
     tiles.py               XYZ tile math + downloading (from Scarlett V7)
     mosaic.py              tiles -> EPSG:3857 raster -> UTM GeoTIFF + preview
+    wayback.py             Esri Wayback: available capture dates + clarity ranking
   delineation/
     model.py               loads the YOLO weights once (CPU/GPU)
     inference.py           512 px sliding window, instance de-duplication
     vectorize.py           label raster -> cleaned polygons with attributes
 web/
   index.html               page layout
-  static/app.js            map, bbox, jobs, results, editing, database, export
+  static/app.js            map, tabs, bbox, imagery dates, jobs, results, editing, export
   static/loader.js         startup loading screen (field animation + model status)
   static/style.css         TU Delft themed styling
+  static/favicon.svg       browser tab icon
 DelTool.bat                Windows launcher (double-click)
 DelAny/                   model weights, downloaded by run.py (not in git):
   best_trained_on_ghana_viedia_unfrozen.pt   fine-tuned
@@ -229,7 +274,6 @@ DelAny/                   model weights, downloaded by run.py (not in git):
 Tiffany/Scarlett V7.py     original standalone imagery script (reference)
 outputs/<run id>/          per run: mosaic_utm.tif, labels.tif, fields.gpkg, job.json,
                            edits/ (undo history), qgis/ (copies opened in QGIS)
-database/deltool.sqlite    field database (kept when runs are deleted)
 ```
 
 ## How delineation works
@@ -252,3 +296,5 @@ edge. If this happens, use a coarser resolution.
 Developed at Delft University of Technology (IFM4040 Joint Interdisciplinary
 Project) in collaboration with TAHMO (Trans-African Hydro-Meteorological
 Observatory). Model: Delineate-Anything v2 (Lavreniuk et al.), fine-tuned.
+
+Authors: Tymen van Beuningen, Risa Deshwal, Jimmy Oei and Vlad Parau.

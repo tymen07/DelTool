@@ -46,8 +46,8 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
 WEB_DIR = PROJECT_ROOT / "web"
 
-# Field database: saved delineations of all runs, kept when runs are deleted.
-DATABASE_PATH = PROJECT_ROOT / "database" / "deltool.sqlite"
+# Downloaded service metadata (e.g. the Wayback version list).
+CACHE_DIR = PROJECT_ROOT / "cache"
 
 # Number of edit steps per run that can be undone.
 EDIT_HISTORY_LIMIT = 30
@@ -56,10 +56,20 @@ EDIT_HISTORY_LIMIT = 30
 # Imagery
 # ---------------------------------------------------------------------------
 TILE_SOURCES = {
+    # Scarlett: Google's current satellite mosaic. Sharp, but no control over
+    # (or record of) when the imagery was taken.
     "google": {
         "label": "Google Satellite",
         "url": "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
         "max_zoom": 21,
+    },
+    # Esri World Imagery Wayback: dated versions of Esri's basemap, so the
+    # capture date can be chosen (see deltool/imagery/wayback.py).
+    "wayback": {
+        "label": "Esri Wayback",
+        "url": ("https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/"
+                "default028mm/MapServer/tile/{release}/{z}/{y}/{x}"),
+        "max_zoom": 19,
     },
 }
 DEFAULT_TILE_SOURCE = "google"
@@ -83,5 +93,5 @@ MODEL_MIN_CONFIDENCE = 0.05
 DEFAULT_CONFIDENCE = 0.15    # Delineate-Anything default minimum confidence
 DEFAULT_IOU = 0.6
 DEFAULT_BATCH_SIZE = 8
-DEFAULT_MIN_FIELD_AREA_M2 = 2500   # Delineate-Anything default for fields/holes
-DEFAULT_SIMPLIFY_M = 1.0
+DEFAULT_MIN_FIELD_AREA_M2 = 5000   # Delineate-Anything default for fields/holes
+DEFAULT_SIMPLIFY_M = 10.0

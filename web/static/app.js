@@ -1,5 +1,5 @@
 /* DelTool frontend: bbox selection, job submission/polling, results display,
- * polygon editing, field database & export. */
+ * polygon editing & export. */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -17,6 +17,7 @@ const api = async (path, opts = {}) => {
 };
 const fmt = (v, d = 0) => Number(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const fmtDay = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const fmtDate = (iso) => new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 const state = {
@@ -40,9 +41,11 @@ const state = {
   vertexLayer: null,        // the one field whose vertices are being edited
   drawKind: null,           // "bbox" | "field" | "split" while drawing
   createKind: null,
-  // database
-  database: null,
-  dbLayer: null,
+  // imagery source
+  imagerySource: "google",
+  wayback: { key: null, result: null, selected: null, showAll: false },
+  runSelection: new Set(),  // runs ticked in the list, for exporting together
+  waybackLayer: null,
 };
 
 // ------------------------------------------------------------------ toasts
@@ -62,7 +65,7 @@ const fitView = (bounds) => map.fitBounds(bounds, { paddingTopLeft: panelPadding
 
 const map = L.map("map", { zoomControl: false });
 fitView(GHANA);
-map.createPane("database").style.zIndex = 390;   // saved fields below this run's fields
+map.createPane("wayback").style.zIndex = 250;    // dated imagery preview above the basemap
 map.createPane("labels").style.zIndex = 650;     // place names above the fields
 map.getPane("labels").style.pointerEvents = "none";
 
@@ -107,8 +110,37 @@ const FIELD_STYLE = { color: CYAN, weight: 1.8, fillColor: CYAN, fillOpacity: 0.
 const FIELD_HOVER = { color: YELLOW, weight: 2.6, fillColor: YELLOW, fillOpacity: 0.22 };
 const FIELD_SELECTED = { color: YELLOW, weight: 3, fillColor: YELLOW, fillOpacity: 0.32 };
 const DRAW_STYLE = { color: YELLOW, weight: 2.5, fillColor: YELLOW, fillOpacity: 0.15 };
-const DB_STYLE = { color: GREEN, weight: 1.4, dashArray: "4 3", fillColor: GREEN, fillOpacity: 0.07, pane: "database", pmIgnore: true };
 const SNAP = { snappable: true, snapDistance: 14 };
+
+// ---------------------------------------------------------------- tabs
+// The panel is split into steps: 1 Area, 2 Imagery, 3 Run, 4 Results.
+function showTab(name) {
+  document.querySelectorAll(".tabs [data-tab]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === name);
+    b.setAttribute("aria-selected", b.dataset.tab === name);
+  });
+  document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
+  document.querySelector("#panel .scroll").scrollTop = 0;
+  if (name !== "results") setEditing(false);
+  syncResultLayers();
+  try { localStorage.setItem("deltool-tab", name); } catch (_) {}
+}
+document.querySelectorAll(".tabs [data-tab]").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+document.addEventListener("click", (e) => {
+  const link = e.target.closest?.("[data-goto]");
+  if (link) { e.preventDefault(); showTab(link.dataset.goto); }
+});
+
+// Small markers on the tabs: done, needs attention, running.
+function updateTabStates() {
+  const set = (id, cls, title) => { $(id).className = `tab-state ${cls}`; $(id).title = title; };
+  set("tab-state-area", currentBBox() ? "done" : "", currentBBox() ? "Box drawn" : "No box yet");
+  const imageryOk = state.imagerySource === "google" || state.wayback.selected;
+  set("tab-state-imagery", imageryOk ? "done" : "todo", imageryOk ? "Imagery chosen" : "Pick an imagery date");
+  const running = state.jobs.some((jb) => ["running", "queued"].includes(jb.status));
+  set("tab-state-run", running ? "busy" : "", running ? "A run is in progress" : "");
+  $("tab-runs-count").textContent = state.jobs.length || "";
+}
 
 // ------------------------------------------------------------ tooltips
 // Hover, focus or click an (i) icon to read more. Clicking an icon never
@@ -267,7 +299,11 @@ function setBBox(bounds, { fit = false } = {}) {
   if (!bounds) {
     ["w", "s", "e", "n"].forEach((k) => ($(`bbox-${k}`).value = ""));
     $("plan-info").innerHTML = "Draw a box on the map to start.";
-    updateGenerateButton(false);
+    state.wayback.key = null;
+    clearWaybackResult();
+    renderWaybackStatus({ status: "idle", message: "" });
+    $("wayback-status").textContent = "Draw a box to see the available dates.";
+    updateGenerateButton();
     return;
   }
   state.bboxLayer = L.rectangle(bounds, BBOX_STYLE).addTo(map);
@@ -314,9 +350,21 @@ $("btn-goto").onclick = () => {
 $("goto").addEventListener("keydown", (e) => e.key === "Enter" && $("btn-goto").click());
 
 // ------------------------------------------------------------- params
-function resolution() {
+// The chosen resolution, for both sources. A Wayback date can't be finer than
+// its real detail (the capture resolution, but no finer than the deepest zoom
+// Esri serves it at).
+function waybackResolution(c) {
+  return c ? Math.round(Math.max(c.resolution_m || 0.5, c.max_zoom_res_m) * 100) / 100 : 0;
+}
+
+function chosenResolution() {
   const custom = parseFloat($("resolution-custom").value);
   return custom > 0 ? custom : state.resolution;
+}
+
+function resolution() {
+  const res = chosenResolution();
+  return state.imagerySource === "wayback" ? Math.max(res, waybackResolution(state.wayback.selected)) : res;
 }
 
 function renderResolutionPicker(choices, selected) {
@@ -338,10 +386,22 @@ $("resolution-custom").addEventListener("input", () => {
   schedulePlan();
 });
 
+function imageryParams() {
+  const c = state.imagerySource === "wayback" ? state.wayback.selected : null;
+  return {
+    source: state.imagerySource,
+    wayback_release: c?.release ?? null,
+    max_zoom: c?.max_zoom ?? null,
+    imagery_date: c?.capture_date ?? "",
+    imagery_label: c ? `${c.satellite}, ${c.resolution_m} m, captured ${c.capture_date} (Esri Wayback)` : "",
+  };
+}
+
 function readParams() {
   return {
     bbox: currentBBox(),
     resolution_m: resolution(),
+    ...imageryParams(),
     model: state.model,
     device: state.deviceChoice,
     min_area_m2: parseFloat($("min_area_m2").value),
@@ -364,14 +424,15 @@ async function updatePlan() {
   const p = readParams();
   if (!p.bbox) return;
   try {
+    lookupWayback();
     const plan = await api(`/api/plan?overlap=${p.overlap}`, {
-      method: "POST", body: { bbox: p.bbox, resolution_m: p.resolution_m },
+      method: "POST", body: { bbox: p.bbox, resolution_m: p.resolution_m, source: p.source,
+        wayback_release: p.wayback_release, max_zoom: p.max_zoom },
     });
     const gpu = effectiveDevice() === "cuda";
     const secPerTile = gpu ? 0.08 : 1.6;
     const etaS = plan.model_tiles * secPerTile + plan.download_tiles * 0.03 + 5;
     const eta = etaS < 90 ? `${Math.ceil(etaS / 5) * 5} s` : `${Math.ceil(etaS / 60)} min`;
-    const db = plan.database;
     $("plan-info").innerHTML = `
       <div class="kv">
         <span>Area</span><span><b>${fmt(plan.area_km2, 2)} km²</b> (${fmt(plan.area_km2 * 100)} ha)</span>
@@ -380,11 +441,9 @@ async function updatePlan() {
         <span>Model tiles</span><span>${fmt(plan.model_tiles)} (${fmt(plan.download_tiles)} imagery tiles)</span>
         <span>Estimated time</span><span>~${eta} on ${gpu ? "GPU" : "CPU"}</span>
       </div>
-      ${db.fields ? `<div class="db-hit"><b>${fmt(db.fields)}</b> saved fields already in this area
-        (${db.runs.map(esc).join(", ")}). <a href="#" id="plan-show-db">Show them</a></div>` : ""}
       ${plan.too_large ? `<div class="warn" style="margin-top:6px">Too large (limit ${state.config.max_output_pixels / 1e6} Mpx). Shrink the box or use a coarser resolution.</div>` : ""}`;
-    $("plan-show-db")?.addEventListener("click", (e) => { e.preventDefault(); setDbLayer(true); });
     planOk = !plan.too_large;
+    if (state.wayback.result && state.imagerySource === "wayback") renderWaybackList();   // resolution note
   } catch (err) {
     $("plan-info").innerHTML = `<span class="warn">${esc(err.message)}</span>`;
     planOk = false;
@@ -394,8 +453,186 @@ async function updatePlan() {
 
 function updateGenerateButton() {
   const busy = state.activeJob && ["queued", "running"].includes(state.activeJob.status);
-  $("btn-generate").disabled = !(planOk && currentBBox()) || busy;
+  const needsDate = state.imagerySource === "wayback" && !state.wayback.selected;
+  const reason = !currentBBox() ? 'Draw a box first, under <a href="#" data-goto="area">1 · Area</a>.'
+    : needsDate ? 'Pick an imagery date first, under <a href="#" data-goto="imagery">2 · Imagery</a>.'
+    : busy ? "A run is in progress."
+    : !planOk ? 'The box is too large for this resolution; see <a href="#" data-goto="area">1 · Area</a>.' : "";
+  $("btn-generate").disabled = !!reason;
+  $("generate-hint").innerHTML = reason;
+  $("generate-hint").classList.toggle("hidden", !reason);
+  updateTabStates();
 }
+
+// ------------------------------------------------------- imagery source
+const WAYBACK_TILES = "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/{release}/{z}/{y}/{x}";
+const WAYBACK_SHOWN = 5;
+
+function setImagerySource(src) {
+  state.imagerySource = src;
+  $("imagery-source").querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.src === src);
+    b.setAttribute("aria-checked", b.dataset.src === src);
+  });
+  $("wayback-panel").classList.toggle("hidden", src !== "wayback");
+  try { localStorage.setItem("deltool-source", src); } catch (_) {}
+  updateWaybackLayer();
+  if (currentBBox()) schedulePlan();
+  updateGenerateButton();
+}
+$("imagery-source").querySelectorAll("button").forEach((b) => (b.onclick = () => setImagerySource(b.dataset.src)));
+
+// Look up the dates for the current box (and target zoom); the server does
+// this in the background, so poll until it is done.
+let waybackPoll = null;
+async function lookupWayback() {
+  const bbox = currentBBox();
+  if (state.imagerySource !== "wayback" || !bbox) return;
+  const key = bbox.join(",");
+  if (key === state.wayback.key) return;
+  state.wayback.key = key;
+  clearTimeout(waybackPoll);
+  renderWaybackStatus({ status: "running", progress: 0, message: "Looking up imagery dates" });
+  try {
+    // look up at the finest zoom, so every date shows its full detail
+    let task = await api("/api/wayback", { method: "POST", body: { bbox, resolution_m: 0.3 } });
+    while (task.status === "running") {
+      if (key !== state.wayback.key) return;
+      renderWaybackStatus(task);
+      await new Promise((r) => (waybackPoll = setTimeout(r, 900)));
+      task = await api(`/api/wayback/${encodeURIComponent(task.id)}`);
+    }
+    if (key !== state.wayback.key) return;
+    if (task.status === "failed") throw new Error(task.message);
+    showWaybackResult(task.result);
+  } catch (err) {
+    if (key !== state.wayback.key) return;
+    state.wayback.key = null;   // allow a retry
+    clearWaybackResult();
+    renderWaybackStatus({ status: "failed", message: err.message });
+  }
+}
+
+function renderWaybackStatus(task) {
+  const el = $("wayback-status");
+  el.classList.toggle("hidden", task.status === "done");
+  if (task.status === "failed") {
+    el.innerHTML = `<span class="warn">${esc(task.message)}</span> <a href="#" id="wayback-retry">Try again</a>`;
+    $("wayback-retry").onclick = (e) => { e.preventDefault(); lookupWayback(); };
+    return;
+  }
+  el.innerHTML = `<div class="wb-progress"><span class="spinner"></span>${esc(task.message || "Looking up imagery dates")}…</div>
+    <div class="bar"><div style="width:${Math.round((task.progress || 0) * 100)}%"></div></div>
+    <div class="muted small">The first lookup for an area can take up to a minute.</div>`;
+  if (task.status === "running") clearWaybackResult();
+}
+
+// Drop the previous area's dates and notes (counts, failed versions, resolution).
+function clearWaybackResult() {
+  Object.assign(state.wayback, { result: null, selected: null });
+  $("wayback-list").innerHTML = "";
+  $("wayback-res").innerHTML = "";
+  $("wayback-more").classList.add("hidden");
+  updateWaybackLayer();
+}
+
+function showWaybackResult(result) {
+  state.wayback.result = result;
+  const want = state.wayback.prefer ?? state.wayback.selected?.release;
+  state.wayback.prefer = null;
+  const keep = result.candidates.find((c) => c.release === want);
+  state.wayback.selected = keep ?? result.candidates[0] ?? null;
+  renderWaybackStatus({ status: "done" });
+  renderWaybackList();
+  updateWaybackLayer();
+  schedulePlan();
+}
+
+const TIER_LABEL = { recommended: "Recommended", good: "Good", fair: "Fair", poor: "Poor" };
+
+function renderWaybackList() {
+  const { result, selected, showAll } = state.wayback;
+  const list = $("wayback-list");
+  list.innerHTML = "";
+  if (!result) return;
+  const cands = result.candidates;
+  const shown = showAll ? cands : cands.slice(0, WAYBACK_SHOWN);
+  if (selected && !shown.includes(selected)) shown.push(selected);
+  for (const c of shown) {
+    const li = document.createElement("li");
+    li.className = `wb-item ${c.tier}${c === selected ? " active" : ""}`;
+    li.setAttribute("role", "radio");
+    li.setAttribute("aria-checked", c === selected);
+    li.tabIndex = 0;
+    const m = c.measures;
+    const detail = m ? `Preview: edges ${m.edges}, contrast ${m.contrast}, colour ${m.colour}, haze ${m.haze}, cloud ${Math.round(m.cloud * 100)}%. ` : "";
+    const caps = c.captures.map((x) => `${fmtDay(x.date)} ${x.satellite} ${x.resolution_m} m (${Math.round(x.share * 100)}%)`).join("; ");
+    li.innerHTML = `
+      ${c.thumb ? `<img class="wb-thumb" src="${c.thumb}" alt="">` : '<div class="wb-thumb"></div>'}
+      <div class="wb-body">
+        <div class="wb-head"><b>${fmtDay(c.capture_date)}</b>
+          <span class="wb-badge ${c.tier}">${TIER_LABEL[c.tier]}</span>
+          <span class="wb-score" title="Boundary clarity score (0-100)">${c.score}</span></div>
+        <div class="wb-sub">${esc(c.satellite)} · ${waybackResolution(c)} m</div>
+        <div class="wb-reasons">${c.reasons.map(esc).join(" · ")}</div>
+      </div>
+      ${infoIcon(`${detail}Captures in the box: ${caps}. Served up to zoom ${c.max_zoom} (~${c.max_zoom_res_m} m).`)}`;
+    const pick = () => selectWayback(c);
+    li.onclick = pick;
+    li.onkeydown = (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), pick());
+    list.appendChild(li);
+  }
+  const checked = result.versions_checked, failed = result.versions_failed || 0;
+  $("wayback-res").innerHTML = (checked > cands.length
+    ? `<div>${checked} Esri versions changed this area; they show ${cands.length} different ${cands.length === 1 ? "capture" : "captures"}.</div>` : "")
+    + (failed ? `<div class="warn">${failed} older ${failed === 1 ? "version" : "versions"} could not be read: Esri's server did not respond. <a href="#" id="wayback-reload">Look up again</a></div>` : "")
+    + (selected ? `<div>Finest detail of this date: <b>${waybackResolution(selected)} m</b>. ${resolutionNote(selected)}</div>` : "");
+  const more = $("wayback-more");
+  more.classList.toggle("hidden", cands.length <= WAYBACK_SHOWN);
+  more.textContent = showAll ? "Show fewer dates" : `Show all ${cands.length} dates`;
+}
+document.addEventListener("click", (e) => {
+  if (e.target.id !== "wayback-reload") return;
+  e.preventDefault();
+  api("/api/wayback/forget", { method: "POST", body: { bbox: currentBBox(), resolution_m: 0.3 } })
+    .then(() => { state.wayback.key = null; lookupWayback(); })
+    .catch((err) => toast(err.message, "error"));
+});
+$("wayback-more").onclick = () => { state.wayback.showAll = !state.wayback.showAll; renderWaybackList(); };
+
+// The model was fine-tuned on ~1 m imagery: at much finer resolutions fields
+// look larger than it is used to and the outlines get ragged.
+function resolutionNote(c) {
+  const res = resolution();
+  return res > waybackResolution(c) + 0.005
+    ? `The run downsamples it to <b>${res} m</b> (set under Resolution).`
+    : `The run uses <b>${res} m</b>.`;
+}
+
+function selectWayback(c) {
+  state.wayback.selected = c;
+  renderWaybackList();
+  updateWaybackLayer();
+  schedulePlan();
+  updateGenerateButton();
+}
+
+// Preview of the selected date on the map, above the basemap.
+function updateWaybackLayer() {
+  const c = state.wayback.selected;
+  const show = state.imagerySource === "wayback" && c && $("wayback-preview").checked;
+  if (state.waybackLayer && (!show || state.waybackLayer.options.release !== c.release)) {
+    map.removeLayer(state.waybackLayer);
+    state.waybackLayer = null;
+  }
+  if (show && !state.waybackLayer) {
+    state.waybackLayer = L.tileLayer(WAYBACK_TILES, {
+      release: c.release, maxZoom: 20, maxNativeZoom: c.max_zoom, pane: "wayback",
+      attribution: `Imagery © Esri World Imagery Wayback (${fmtDay(c.capture_date)})`,
+    }).addTo(map);
+  }
+}
+$("wayback-preview").onchange = updateWaybackLayer;
 
 ["overlap"].forEach((id) => $(id).addEventListener("input", schedulePlan));
 for (const id of ["overlap", "iou"]) {
@@ -429,9 +666,9 @@ async function selectJob(jobId) {
     state.pollTimer = setInterval(pollJob, 1000);
   } else if (job.status === "done") {
     await showResults(job, { fit: true });
+    showTab("results");
   }
   highlightJobList();
-  if (state.dbLayer) loadDbLayer();
 }
 
 async function pollJob() {
@@ -441,12 +678,18 @@ async function pollJob() {
   if (!["queued", "running"].includes(job.status)) {
     clearInterval(state.pollTimer);
     refreshJobList();
-    if (job.status === "done") await showResults(job, { fit: true });
+    if (job.status === "done") {
+      await showResults(job, { fit: true });
+      showTab("results");
+      rainbow(8000);
+    }
   }
 }
 
 const STAGE_ORDER = ["imagery", "inference", "vectorize"];
 function renderJob(job) {
+  const j = state.jobs.find((x) => x.id === job.id);
+  if (j) j.status = job.status;
   const active = job.status === "queued" || job.status === "running";
   $("progress").classList.toggle("hidden", !(active || job.status === "failed" || job.status === "cancelled"));
   $("btn-cancel").classList.toggle("hidden", !active);
@@ -468,6 +711,7 @@ function clearResults() {
   state.layers.clear();
   state.selected.clear();
   $("results").classList.add("hidden");
+  $("results-empty").classList.remove("hidden");
   $("map-legend").classList.add("hidden");
 }
 
@@ -475,6 +719,8 @@ async function showResults(job, { fit = false } = {}) {
   // Restore the run's bbox and parameters in the form so it can be tweaked/re-run.
   const [w, s, e, n] = job.params.bbox;
   setBBox(L.latLngBounds([s, w], [n, e]));
+  if (job.params.source === "wayback") state.wayback.prefer = job.params.wayback_release;
+  if (job.params.source === "wayback" || state.imagerySource === "wayback") setImagerySource(job.params.source || "google");
   $("pp-min-area").value = job.params.min_area_m2;
   $("pp-simplify").value = job.params.simplify_m;
 
@@ -483,11 +729,10 @@ async function showResults(job, { fit = false } = {}) {
   if (state.imageryLayer) map.removeLayer(state.imageryLayer);
   state.imageryLayer = L.imageOverlay(`/api/jobs/${job.id}/preview.png?t=${Date.now()}`,
     job.result.mosaic.preview_bounds, { opacity: parseFloat($("imagery-opacity").value) });
-  if ($("toggle-imagery").checked) state.imageryLayer.addTo(map);
-
   renderFields();
   renderJobActions();
   $("results").classList.remove("hidden");
+  $("results-empty").classList.add("hidden");
   if (fit) fitView(L.latLngBounds([s, w], [n, e]));
 }
 
@@ -529,7 +774,7 @@ function renderFields() {
     style: (f) => (state.selected.has(f.properties.field_id) ? FIELD_SELECTED : FIELD_STYLE),
     onEachFeature: bindField,
   });
-  if ($("toggle-fields").checked || state.editing) state.fieldsLayer.addTo(map);
+  syncResultLayers();
   syncVertexEdit();
   renderStats();
   updateEditToolbar();
@@ -552,12 +797,17 @@ function renderStats() {
     stat(`${fmt(meanHa, 2)} ha`, "mean field size") +
     stat(r.runtime_s ? `${Math.round(r.runtime_s)} s` : "–", `${job.params.resolution_m} m · ${r.mosaic.crs} · ${(r.device ?? "cpu").startsWith("cuda") ? "GPU" : "CPU"}`) +
     `<div class="stat stat-model"><span>Model</span><b>${esc(usedModel.name)}</b></div>` +
+    `<div class="stat stat-model"><span>Imagery</span><b>${esc(imageryText(r.imagery))}</b></div>` +
     (r.mosaic.missing_tiles ? `<div class="stat warn-box">${r.mosaic.missing_tiles} of ${r.mosaic.total_tiles} imagery tiles failed to download</div>` : "");
 
   $("map-legend").innerHTML = `<span class="legend-swatch"></span><b>${fmt(visible.length)}</b> fields · ${fmt(areaHa, 1)} ha
-    <div class="muted" style="margin-top:2px">${esc(usedModel.name)} · confidence ≥ ${minConfidence().toFixed(2)}</div>
-    ${state.dbLayer ? '<div class="muted" style="margin-top:4px"><span class="legend-swatch db"></span>saved fields of other runs</div>' : ""}`;
-  $("map-legend").classList.remove("hidden");
+    <div class="muted" style="margin-top:2px">${esc(usedModel.name)} · confidence ≥ ${minConfidence().toFixed(2)}</div>`;
+  syncResultLayers();
+}
+
+function imageryText(img) {
+  if (!img || img.source === "google") return "Google · date unknown";
+  return `${img.source_label} · ${img.date ? fmtDay(img.date) : "date unknown"}`;
 }
 
 function bindField(feature, layer) {
@@ -592,6 +842,7 @@ function openFieldPopup(feature, latlng) {
     </div>`;
   div.querySelector("[data-act=edit]").onclick = () => {
     map.closePopup();
+    showTab("results");
     setEditing(true);
     selectField(p.field_id, false);
   };
@@ -605,16 +856,15 @@ function openFieldPopup(feature, latlng) {
 let confFrame = null;
 $("confidence").addEventListener("input", () => {
   $("confidence-val").textContent = minConfidence().toFixed(2);
+  renderRunsExport();
   cancelAnimationFrame(confFrame);
   confFrame = requestAnimationFrame(renderFields);
 });
 
-$("toggle-fields").onchange = (e) => state.fieldsLayer && (e.target.checked ? state.fieldsLayer.addTo(map) : map.removeLayer(state.fieldsLayer));
+$("toggle-fields").onchange = syncResultLayers;
 $("toggle-imagery").onchange = (e) => {
   $("imagery-opacity").classList.toggle("hidden", !e.target.checked);
-  if (!state.imageryLayer) return;
-  if (e.target.checked) { state.imageryLayer.addTo(map); state.fieldsLayer?.bringToFront(); }
-  else map.removeLayer(state.imageryLayer);
+  syncResultLayers();
 };
 $("imagery-opacity").oninput = (e) => state.imageryLayer?.setOpacity(parseFloat(e.target.value));
 
@@ -653,10 +903,8 @@ function setEditing(on) {
   cancelDraw();
   map.closePopup();
   if (!on) state.selected.clear();
-  if (on && state.fieldsLayer && !map.hasLayer(state.fieldsLayer)) {
-    $("toggle-fields").checked = true;
-    state.fieldsLayer.addTo(map);
-  }
+  if (on) $("toggle-fields").checked = true;
+  syncResultLayers();
   document.body.classList.toggle("editing", on);
   $("edit-toolbar").classList.toggle("hidden", !on);
   $("btn-edit").classList.toggle("active", on);
@@ -789,41 +1037,32 @@ document.addEventListener("keydown", (e) => {
   else if (key === "m") $("et-merge").click();
 });
 
-// ------------------------------------------------- database & QGIS (run)
+// A run's imagery, fields and legend are only on the map under Results, so
+// the other steps show the plain basemap (and the Wayback preview).
+const onResultsTab = () => document.querySelector('.tab-pane[data-pane="results"]')?.classList.contains("active");
+
+function syncResultLayers() {
+  const on = onResultsTab();
+  const show = (layer, wanted) => {
+    if (!layer) return;
+    if (on && wanted && !map.hasLayer(layer)) layer.addTo(map);
+    if (!(on && wanted) && map.hasLayer(layer)) map.removeLayer(layer);
+  };
+  show(state.imageryLayer, $("toggle-imagery").checked);
+  show(state.fieldsLayer, $("toggle-fields").checked || state.editing);
+  if (state.fieldsLayer && map.hasLayer(state.fieldsLayer)) state.fieldsLayer.bringToFront();
+  $("map-legend").classList.toggle("hidden", !(on && state.geojson));
+}
+
+// ------------------------------------------------------- QGIS (run)
 function renderJobActions() {
   const job = state.activeJob;
   if (!job) return;
-  const saved = job.in_database;
-  const stale = saved && job.result.edited && job.result.edited > saved;
-  const btn = $("btn-db-save");
-  btn.classList.toggle("saved", !!saved && !stale);
-  btn.classList.toggle("attention", !!stale);
-  btn.querySelector("span").textContent = !saved ? "Save to database" : stale ? "Update in database (edited since save)" : "Saved in database ✓";
-  btn.title = saved ? `Last saved ${fmtDate(saved)}. Click to save again with the current fields and confidence.` : "";
   const edits = job.result.edited;
   $("edited-note").classList.toggle("hidden", !edits);
   $("edited-note").textContent = edits ? `edited ${fmtDate(edits)}` : "";
   $("qgis-import").classList.toggle("hidden", !job.result.qgis_file);
 }
-
-$("btn-db-save").onclick = async () => {
-  const btn = $("btn-db-save");
-  btn.disabled = true;
-  try {
-    const res = await api(`/api/jobs/${state.activeJob.id}/database?min_confidence=${minConfidence()}`, { method: "POST" });
-    state.activeJob = res.job;
-    renderJobActions();
-    const o = res.overlap;
-    toast(`Saved ${fmt(res.entry.field_count)} fields to the database.` +
-      (o.fields ? ` ${fmt(o.fields)} of them overlap saved fields of: ${o.runs.join(", ")}.` : ""), o.fields ? "warn" : "ok", o.fields ? 8000 : 4500);
-    refreshJobList();
-    refreshDatabase();
-  } catch (err) {
-    toast(err.message, "error");
-  } finally {
-    btn.disabled = false;
-  }
-};
 
 $("btn-qgis").onclick = async () => {
   try {
@@ -859,17 +1098,28 @@ async function refreshJobList() {
     const short = modelSpec(job.params.model ?? "finetuned").short;
     const info = job.status === "done"
       ? `${fmt(job.result.field_count)} fields · ${job.params.resolution_m} m · ${short}` : `${job.status} · ${short}`;
-    li.innerHTML = `<span class="dot ${job.status}"></span>
+    const imgDate = job.params.source === "wayback" && job.params.imagery_date ? ` · imagery ${job.params.imagery_date.slice(0, 7)}` : "";
+    const tick = job.status === "done"
+      ? `<input type="checkbox" class="run-check" title="Select for export"${state.runSelection.has(job.id) ? " checked" : ""}>`
+      : '<span class="run-check-spacer"></span>';
+    li.innerHTML = `${tick}<span class="dot ${job.status}"></span>
       <div class="meta"><div class="name-row"><span class="name"></span>
-        ${job.in_database ? '<span class="db-badge" title="Saved in the field database">DB</span>' : ""}</div>
-        <div class="sub">${fmtDate(job.created)} · ${info}</div></div>
+</div>
+        <div class="sub">${fmtDate(job.created)} · ${info}${imgDate}</div></div>
       <button class="del" title="Delete run">✕</button>`;
     li.querySelector(".name").textContent = job.name;
     li.onclick = () => selectJob(job.id);
+    const check = li.querySelector(".run-check");
+    if (check) {
+      check.onclick = (e) => e.stopPropagation();
+      check.onchange = () => {
+        check.checked ? state.runSelection.add(job.id) : state.runSelection.delete(job.id);
+        renderRunsExport();
+      };
+    }
     li.querySelector(".del").onclick = async (e) => {
       e.stopPropagation();
-      const keep = job.in_database ? " Its fields saved in the database are kept." : "";
-      if (!confirm(`Delete run "${job.name}" and its files?${keep}`)) return;
+      if (!confirm(`Delete run "${job.name}" and its files?`)) return;
       try {
         await api(`/api/jobs/${job.id}`, { method: "DELETE" });
         if (state.activeJob?.id === job.id) forgetActiveJob();
@@ -878,9 +1128,58 @@ async function refreshJobList() {
     };
     $("job-list").appendChild(li);
   }
+  const done = new Set(jobs.filter((j) => j.status === "done").map((j) => j.id));
+  state.runSelection.forEach((id) => done.has(id) || state.runSelection.delete(id));
+  renderRunsExport();
   highlightJobList();
-  renderDatabaseList();
+  updateTabStates();
 }
+
+// Several runs ticked in the list: download their fields in one file.
+function renderRunsExport() {
+  const n = state.runSelection.size;
+  $("runs-export").classList.toggle("hidden", n === 0);
+  $("runs-sel-count").textContent = `${n} ${n === 1 ? "run" : "runs"} selected`;
+  $("btn-export-runs").textContent = `Download fields of ${n} ${n === 1 ? "run" : "runs"}`;
+  $("runs-export-note").textContent = `One file; the run_name and run_id columns tell the runs apart. `
+    + `Only fields with confidence ≥ ${minConfidence().toFixed(2)} (the slider above).`;
+}
+
+$("runs-sel-all").onclick = (e) => {
+  e.preventDefault();
+  state.jobs.filter((j) => j.status === "done").forEach((j) => state.runSelection.add(j.id));
+  document.querySelectorAll("#job-list .run-check").forEach((c) => (c.checked = true));
+  renderRunsExport();
+};
+$("runs-sel-clear").onclick = (e) => {
+  e.preventDefault();
+  state.runSelection.clear();
+  document.querySelectorAll("#job-list .run-check").forEach((c) => (c.checked = false));
+  renderRunsExport();
+};
+
+$("btn-export-runs").onclick = async () => {
+  const q = new URLSearchParams({
+    ids: [...state.runSelection].join(","), format: $("runs-format").value,
+    crs: $("runs-crs").value, min_confidence: minConfidence(),
+  });
+  const btn = $("btn-export-runs");
+  btn.disabled = true;
+  try {
+    // fetched first, so an error (e.g. runs in different UTM zones) shows as a message
+    const res = await api(`/api/export?${q}`);
+    const name = /filename="?([^";]+)"?/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "fields";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(await res.blob());
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 function forgetActiveJob() {
   setEditing(false);
@@ -892,7 +1191,7 @@ function forgetActiveJob() {
 
 $("btn-delete-all").onclick = async () => {
   const n = state.jobs.length;
-  if (!confirm(`Delete all ${n} runs and their files (imagery and model output)? This cannot be undone.\n\nFields saved in the field database are kept.`)) return;
+  if (!confirm(`Delete all ${n} runs and their files (imagery and model output)? This cannot be undone.`)) return;
   try {
     const res = await api("/api/jobs", { method: "DELETE" });
     if (state.activeJob && state.activeJob.status !== "running") forgetActiveJob();
@@ -906,129 +1205,10 @@ function highlightJobList() {
     li.classList.toggle("active", li.dataset.id === state.activeJob?.id));
 }
 
-// ------------------------------------------------------------ database
-async function refreshDatabase() {
-  state.database = await api("/api/database");
-  renderDatabaseList();
-  if (state.dbLayer) loadDbLayer();
-}
-
-function renderDatabaseList() {
-  const db = state.database;
-  if (!db) return;
-  $("db-summary").textContent = db.run_count ? `${fmt(db.field_count)} fields · ${fmt(db.total_area_ha)} ha` : "";
-  $("db-export").classList.toggle("hidden", !db.run_count);
-  const list = $("db-list");
-  list.innerHTML = db.run_count ? "" : '<li class="muted small empty">Nothing saved yet. Use <i>Save to database</i> under Results.</li>';
-  const existing = new Set(state.jobs.map((j) => j.id));
-  for (const run of db.runs) {
-    const li = document.createElement("li");
-    li.title = "Zoom to these fields";
-    li.innerHTML = `<span class="dot db"></span>
-      <div class="meta"><div class="name"></div>
-        <div class="sub">${fmt(run.field_count)} fields · ${fmt(run.total_area_ha, 1)} ha · saved ${fmtDate(run.saved)}</div></div>
-      ${existing.has(run.run_id) ? '<button class="open" title="Open this run">↗</button>' : ""}
-      <button class="del" title="Remove from the database">✕</button>`;
-    li.querySelector(".name").textContent = run.name;
-    li.onclick = () => {
-      const [w, s, e, n] = run.bbox;
-      setDbLayer(true);
-      fitView(L.latLngBounds([s, w], [n, e]));
-    };
-    li.querySelector(".open")?.addEventListener("click", (e) => { e.stopPropagation(); selectJob(run.run_id); });
-    li.querySelector(".del").onclick = async (e) => {
-      e.stopPropagation();
-      if (!confirm(`Remove the ${fmt(run.field_count)} saved fields of "${run.name}" from the database? The run itself is not deleted.`)) return;
-      try {
-        await api(`/api/database/${encodeURIComponent(run.run_id)}`, { method: "DELETE" });
-        if (state.activeJob?.id === run.run_id) {
-          state.activeJob.in_database = null;
-          renderJobActions();
-        }
-        refreshDatabase();
-        refreshJobList();
-      } catch (err) { toast(err.message, "error"); }
-    };
-    list.appendChild(li);
-  }
-}
-
-function setDbLayer(on) {
-  $("toggle-db").checked = on;
-  if (!on) {
-    if (state.dbLayer) map.removeLayer(state.dbLayer);
-    state.dbLayer = null;
-  } else if (!state.dbLayer) {
-    state.dbLayer = L.geoJSON(null, { style: DB_STYLE, pmIgnore: true, snapIgnore: true, onEachFeature: bindDbField }).addTo(map);
-    loadDbLayer();
-  }
-  if (state.geojson) renderStats();
-}
-$("toggle-db").onchange = (e) => setDbLayer(e.target.checked);
-
-let dbRequest = 0, dbTruncatedWarned = false;
-async function loadDbLayer() {
-  if (!state.dbLayer) return;
-  const b = map.getBounds();
-  const q = new URLSearchParams({
-    bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(5)).join(","),
-    exclude: state.activeJob?.id ?? "",
-  });
-  const req = ++dbRequest;
-  try {
-    const fc = await api(`/api/database/fields?${q}`);
-    if (req !== dbRequest || !state.dbLayer) return;
-    state.dbLayer.clearLayers();
-    state.dbLayer.addData(fc);
-    if (fc.truncated && !dbTruncatedWarned) {
-      toast("Showing the 5,000 largest saved fields in view. Zoom in to see all.", "info");
-      dbTruncatedWarned = true;
-    }
-  } catch (err) { toast(err.message, "error"); }
-}
-let dbMoveTimer = null;
-map.on("moveend", () => { clearTimeout(dbMoveTimer); dbMoveTimer = setTimeout(loadDbLayer, 250); });
-
-function bindDbField(feature, layer) {
-  layer.on("click", (e) => {
-    if (state.drawKind || state.editing) return;
-    L.DomEvent.stop(e);
-    const p = feature.properties;
-    const exists = state.jobs.some((j) => j.id === p.run_id);
-    const div = document.createElement("div");
-    div.className = "popup";
-    div.innerHTML = `
-      <h4>Saved field <span class="src db">Database</span></h4>
-      <table>
-        <tr><td>Run</td><td class="name"></td></tr>
-        <tr><td>Area</td><td>${fmt(p.area_ha, 2)} ha</td></tr>
-        <tr><td>Confidence</td><td>${p.confidence.toFixed(2)}</td></tr>
-        <tr><td>Saved</td><td>${fmtDate(p.saved)}</td></tr>
-      </table>
-      ${exists ? '<button class="btn btn-outline btn-sm btn-block">Open this run</button>' : ""}`;
-    div.querySelector(".name").textContent = p.run_name;
-    div.querySelector("button")?.addEventListener("click", () => { map.closePopup(); selectJob(p.run_id); });
-    L.popup({ minWidth: 210 }).setLatLng(e.latlng).setContent(div).openOn(map);
-  });
-}
-
-$("btn-db-export").onclick = () => {
-  const q = new URLSearchParams({ format: $("db-format").value, crs: $("db-crs").value });
-  window.location = `/api/database/export?${q}`;
-};
-$("btn-db-qgis").onclick = async () => {
-  try {
-    await api("/api/database/qgis", { method: "POST" });
-    toast("Opening all saved fields in QGIS.", "ok");
-  } catch (err) { toast(err.message, "error"); }
-};
-
 function renderQgisButtons() {
   const q = state.system.qgis;
-  for (const id of ["btn-qgis", "btn-db-qgis"]) {
-    $(id).disabled = !q.available;
-    if (!q.available) $(id).title = "QGIS was not found on this computer. Install QGIS, or set DELTOOL_QGIS to its executable.";
-  }
+  $("btn-qgis").disabled = !q.available;
+  if (!q.available) $("btn-qgis").title = "QGIS was not found on this computer. Install QGIS, or set DELTOOL_QGIS to its executable.";
 }
 
 // ------------------------------------------------------------- init
@@ -1037,9 +1217,13 @@ async function init() {
   const d = cfg.defaults;
 
   state.resolution = d.resolution_m;
+  let savedSource = "google";
+  try { savedSource = localStorage.getItem("deltool-source") || "google"; } catch (_) {}
+  setImagerySource(savedSource === "wayback" ? "wayback" : "google");
   renderResolutionPicker(cfg.resolutions, d.resolution_m);
   const formats = Object.entries(cfg.export_formats).map(([k, label]) => `<option value="${k}">${label}</option>`).join("");
-  $("export-format").innerHTML = $("db-format").innerHTML = formats;
+  $("export-format").innerHTML = formats;
+  $("runs-format").innerHTML = formats;
 
   for (const key of ["confidence", "min_area_m2", "simplify_m", "overlap", "iou", "batch_size"]) $(key).value = d[key];
   $("confidence-val").textContent = d.confidence.toFixed(2);
@@ -1048,7 +1232,6 @@ async function init() {
   document.querySelectorAll("input[type=range]").forEach(paintRange);
 
   await refreshJobList();
-  await refreshDatabase();
 
   await window.appReady;
   state.system = await api("/api/system");
@@ -1058,10 +1241,38 @@ async function init() {
   renderQgisButtons();
   await refreshJobList();
 
+  showTab("area");
+  updateTabStates();
+
   const linked = new URLSearchParams(location.search).get("run");
   const running = state.jobs.find((j) => j.status === "running" || j.status === "queued");
-  if (linked) selectJob(linked).catch(() => history.replaceState(null, "", "/"));
-  else if (running) selectJob(running.id);
+  const backToArea = () => showTab("area");
+  if (linked) selectJob(linked).catch(() => history.replaceState(null, "", "/")).then(backToArea);
+  else if (running) selectJob(running.id).then(backToArea);
 }
+
+// Easter egg: click the TU Delft / TAHMO logos 3 times for rainbow mode.
+// A short burst also plays whenever a run finishes.
+let rainbowTimer = null;
+function rainbow(ms) {
+  clearTimeout(rainbowTimer);
+  document.body.classList.add("rainbow");
+  if (ms) rainbowTimer = setTimeout(() => document.body.classList.remove("rainbow"), ms);
+}
+(() => {
+  let clicks = 0, last = 0;
+  document.querySelector(".credit-logos")?.addEventListener("click", () => {
+    const now = Date.now();
+    clicks = now - last < 1200 ? clicks + 1 : 1;
+    last = now;
+    if (clicks >= 3) {
+      clicks = 0;
+      if (document.body.classList.contains("rainbow")) {
+        clearTimeout(rainbowTimer);
+        document.body.classList.remove("rainbow");
+      } else rainbow(0);
+    }
+  });
+})();
 
 init();

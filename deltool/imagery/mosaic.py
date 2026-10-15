@@ -63,10 +63,11 @@ def utm_crs_for(lat, lon):
     return f"EPSG:{(32600 if lat >= 0 else 32700) + zone}"
 
 
-def plan_mosaic(bbox, target_res_m, source="google"):
+def plan_mosaic(bbox, target_res_m, source="google", max_zoom=None):
     """Compute output grid and download size without downloading anything.
 
-    bbox = (west, south, east, north) in degrees.
+    bbox = (west, south, east, north) in degrees. max_zoom caps the download
+    zoom, e.g. for a Wayback capture that is only served up to zoom 17.
     """
     west, south, east, north = bbox
     if not (west < east and south < north):
@@ -90,7 +91,7 @@ def plan_mosaic(bbox, target_res_m, source="google"):
     dl_west, dl_south, dl_east, dl_north = transform_bounds(
         crs, "EPSG:4326", left, top - height * target_res_m, left + width * target_res_m, top
     )
-    zoom = zoom_from_target_resolution(target_res_m, TILE_SOURCES[source]["max_zoom"])
+    zoom = zoom_from_target_resolution(target_res_m, min(TILE_SOURCES[source]["max_zoom"], max_zoom or 99))
     x_min, x_max, y_min, y_max = tile_range(dl_west, dl_south, dl_east, dl_north, zoom)
     n_tiles = (x_max - x_min + 1) * (y_max - y_min + 1)
 
@@ -106,7 +107,7 @@ def plan_mosaic(bbox, target_res_m, source="google"):
     }
 
 
-def _download_mercator_raster(plan, source, path, progress=None):
+def _download_mercator_raster(plan, source, path, progress=None, release=None):
     """Download tiles into a tiled EPSG:3857 GeoTIFF. Returns missing tile count."""
     zoom = plan["zoom"]
     x_min, x_max, y_min, y_max = plan["tile_range"]
@@ -129,7 +130,7 @@ def _download_mercator_raster(plan, source, path, progress=None):
     with rasterio.open(path, "w", **profile) as dst, requests.Session() as session:
         with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
             futures = {
-                pool.submit(fetch_tile, session, url_tpl.format(x=x, y=y, z=zoom)): (x, y)
+                pool.submit(fetch_tile, session, url_tpl.format(x=x, y=y, z=zoom, release=release)): (x, y)
                 for x, y in tasks
             }
             for done, future in enumerate(as_completed(futures), start=1):
@@ -172,15 +173,17 @@ def _write_preview(utm_path, png_path):
     return [[s, w], [n, e]]
 
 
-def build_mosaic(bbox, target_res_m, out_dir, source="google", progress=None):
+def build_mosaic(bbox, target_res_m, out_dir, source="google", progress=None, release=None, max_zoom=None):
     """Download imagery for bbox and write `mosaic_utm.tif` + preview into out_dir.
 
-    progress(fraction, message) is called during download/warping.
+    progress(fraction, message) is called during download/warping. For the
+    Wayback source, `release` is the version to download and `max_zoom` the
+    deepest zoom its capture is served at.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    plan = plan_mosaic(bbox, target_res_m, source)
+    plan = plan_mosaic(bbox, target_res_m, source, max_zoom)
     if plan["pixels"] > MAX_OUTPUT_PIXELS:
         raise ValueError(
             f"Area too large: {plan['width']}x{plan['height']} px at {target_res_m} m "
@@ -195,7 +198,7 @@ def build_mosaic(bbox, target_res_m, out_dir, source="google", progress=None):
         if progress:
             progress(0.9 * frac, msg)
 
-    missing = _download_mercator_raster(plan, source, merc_path, dl_progress)
+    missing = _download_mercator_raster(plan, source, merc_path, dl_progress, release)
     if missing == plan["n_tiles"]:
         raise RuntimeError("Could not download any imagery tiles (check internet / tile source).")
 
@@ -225,7 +228,7 @@ def build_mosaic(bbox, target_res_m, out_dir, source="google", progress=None):
         resolution_m=target_res_m, missing_tiles=missing, total_tiles=plan["n_tiles"],
     )
     with open(out_dir / "mosaic.json", "w") as f:
-        json.dump({**asdict(result), "bbox_wgs84": list(bbox), "source": source}, f, indent=2)
+        json.dump({**asdict(result), "bbox_wgs84": list(bbox), "source": source, "release": release}, f, indent=2)
     if progress:
         progress(1.0, "Imagery ready")
     return result
