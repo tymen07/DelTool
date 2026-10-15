@@ -274,6 +274,7 @@ summary:hover { color: var(--text); }
 .runs-export { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border-radius: 10px;
   border: 1px solid rgba(0,166,214,.35); background: var(--accent-soft); }
 .runs-export .grid2 { margin: 0; }
+.runs-selbar { margin: 4px 0 6px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.done { background: var(--ok); box-shadow: 0 0 0 3px rgba(108,194,74,.18); }
 .dot.running, .dot.queued { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }

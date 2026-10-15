@@ -260,12 +260,12 @@
         <i class="info" data-tip="All runs on this computer, newest first. Click one to show its results. Tick several finished runs to download their fields together in one file. Deleting a run removes its files (imagery, model output and fields)."></i>
         <button id="btn-delete-all" class="btn btn-ghost-danger btn-sm push hidden" title="Delete all runs and their files">Delete all</button>
       </h2>
+      <div class="row between runs-selbar">
+        <b id="runs-sel-count" class="small"></b>
+        <span class="small"><a href="#" id="runs-sel-all">Select all</a> · <a href="#" id="runs-sel-clear">Clear</a></span>
+      </div>
       <ul id="job-list"></ul>
       <div id="runs-export" class="runs-export hidden">
-        <div class="row between">
-          <b id="runs-sel-count"></b>
-          <span class="small"><a href="#" id="runs-sel-all">Select all</a> · <a href="#" id="runs-sel-clear">Clear</a></span>
-        </div>
         <div class="grid2">
           <select id="runs-format"></select>
           <select id="runs-crs">

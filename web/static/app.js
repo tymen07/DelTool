@@ -668,6 +668,7 @@ async function selectJob(jobId) {
   const job = await api(`/api/jobs/${jobId}`);
   state.activeJob = job;
   history.replaceState(null, "", `?run=${encodeURIComponent(job.id)}`);
+  syncRunOverlays();
   renderJob(job);
   if (job.status === "queued" || job.status === "running") {
     state.pollTimer = setInterval(pollJob, 1000);
@@ -1109,6 +1110,7 @@ function syncResultLayers() {
   show(state.fieldsLayer, $("toggle-fields").checked || state.editing);
   if (state.fieldsLayer && map.hasLayer(state.fieldsLayer)) state.fieldsLayer.bringToFront();
   $("map-legend").classList.toggle("hidden", !(on && state.geojson));
+  renderRunOverlays();
 }
 
 // ------------------------------------------------------- QGIS (run)
@@ -1197,9 +1199,47 @@ function renderRunsExport() {
   const n = state.runSelection.size;
   $("runs-export").classList.toggle("hidden", n === 0);
   $("runs-sel-count").textContent = `${n} ${n === 1 ? "run" : "runs"} selected`;
+  syncRunOverlays();
   $("btn-export-runs").textContent = `Download fields of ${n} ${n === 1 ? "run" : "runs"}`;
   $("runs-export-note").textContent = `One file; the run_name and run_id columns tell the runs apart. `
     + `Only fields with confidence ≥ ${minConfidence().toFixed(2)} (the slider above).`;
+}
+
+// Fields of every ticked run, drawn on the map (non-interactive) in the normal field style.
+const runOverlays = new Map();   // run id -> { layer, features }
+let overlaySeq = 0;
+
+async function syncRunOverlays() {
+  const seq = ++overlaySeq;
+  const wanted = new Set(state.runSelection);
+  if (state.activeJob) wanted.delete(state.activeJob.id);   // the open run is drawn as the main layer
+  for (const [id, o] of runOverlays) {
+    if (!wanted.has(id)) { map.removeLayer(o.layer); runOverlays.delete(id); }
+  }
+  for (const id of wanted) {
+    if (runOverlays.has(id)) continue;
+    try {
+      const gj = await api(`/api/jobs/${id}/fields`);
+      if (seq !== overlaySeq) return;   // a newer sync superseded this one
+      const layer = L.geoJSON({ type: "FeatureCollection", features: [] }, {
+        interactive: false,
+        style: FIELD_STYLE,
+      });
+      runOverlays.set(id, { layer, features: gj.features });
+    } catch (_) { /* run may have been deleted meanwhile */ }
+  }
+  renderRunOverlays();
+}
+
+function renderRunOverlays() {
+  const c = minConfidence();
+  const on = onResultsTab();
+  for (const o of runOverlays.values()) {
+    o.layer.clearLayers();
+    o.layer.addData({ type: "FeatureCollection", features: o.features.filter((f) => f.properties.confidence >= c) });
+    if (on && !map.hasLayer(o.layer)) o.layer.addTo(map);
+    if (!on && map.hasLayer(o.layer)) map.removeLayer(o.layer);
+  }
 }
 
 $("runs-sel-all").onclick = (e) => {
