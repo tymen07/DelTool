@@ -32,7 +32,7 @@ TILEMAP_URL = ("https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_I
 TILE_URL = TILE_SOURCES["wayback"]["url"]
 METADATA_LAYER = 6         # "1.2m Resolution Metadata": every capture usable at zoom 17 and finer
 PROBE_ZOOM = 17            # ~1.2 m/px: close to what the model sees, and available for every capture
-CHANGE_TILES = 5           # tiles per box used to find the versions with changes
+CHANGE_TILES = 2           # tiles per box used to find the versions with changes
 PREVIEW_TILES = 4          # tiles per date used to judge clarity (2x2 around the centre)
 WORKERS = 16
 MAX_AGE_YEARS = 5          # older imagery is penalised: fields change
@@ -136,14 +136,14 @@ def _tile_span(bbox, z=PROBE_ZOOM):
 
 def _change_tiles(bbox):
     """Tiles where changes are looked for: all of them for a small box, else
-    the centre and four points spread over the box."""
+    two points spread over the box."""
     x0, y0, x1, y1 = _tile_span(bbox)
     tiles = [(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
     if len(tiles) <= CHANGE_TILES:
         return tiles
     pick = lambda a, b, f: round(a + (b - a) * f)
     return sorted({(pick(x0, x1, fx), pick(y0, y1, fy))
-                   for fx, fy in ((0.5, 0.5), (0.2, 0.2), (0.8, 0.2), (0.2, 0.8), (0.8, 0.8))})
+                   for fx, fy in ((0.25, 0.25), (0.75, 0.75))})
 
 
 def _preview_tiles(bbox):
@@ -193,8 +193,8 @@ def _captures(session, release, bbox):
     first; None if the metadata service for this version does not answer."""
     w, s, e, n = bbox
     # The footprints come back whole (often over 1 MB), so generalise them to
-    # ~1/500 of the box: plenty for the share of the box, and far faster.
-    offset = max(1e-5, min(e - w, n - s) / 500)
+    # ~1/50 of the box: plenty for the share of the box, and ~10x faster.
+    offset = max(1e-5, min(e - w, n - s) / 50)
     try:
         data = _get(session, f"{release['metadata_url']}/{METADATA_LAYER}/query", params={
             "geometry": f"{w},{s},{e},{n}", "geometryType": "esriGeometryEnvelope", "inSR": 4326,
