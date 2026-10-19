@@ -94,4 +94,4 @@ DEFAULT_CONFIDENCE = 0.15    # Delineate-Anything default minimum confidence
 DEFAULT_IOU = 0.6
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_MIN_FIELD_AREA_M2 = 5000   # Delineate-Anything default for fields/holes
-DEFAULT_SIMPLIFY_M = 10.0
+DEFAULT_SIMPLIFY_M = 8.0
