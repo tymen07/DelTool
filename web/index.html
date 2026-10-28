@@ -62,6 +62,52 @@
     <button type="button" role="tab" data-tab="results"><span class="tab-num">4</span>Results<span class="tab-count" id="tab-runs-count"></span></button>
   </nav>
 
+  <!-- ====================================================== edit panel -->
+  <section id="edit-panel" aria-label="Edit fields">
+    <div class="ep-head">
+      <h2>Edit fields</h2>
+      <button data-action="undo" class="btn btn-outline btn-icon" title="Undo the last change (Ctrl+Z)">
+        <svg viewBox="0 0 20 20"><path d="M7 4L3 8l4 4"/><path d="M3 8h9a4.5 4.5 0 010 9H9"/></svg></button>
+      <button data-action="redo" class="btn btn-outline btn-icon" title="Redo the undone change (Ctrl+Y)">
+        <svg viewBox="0 0 20 20"><path d="M13 4l4 4-4 4"/><path d="M17 8H8a4.5 4.5 0 000 9h3"/></svg></button>
+      <button id="et-done" class="btn btn-primary btn-sm" title="Stop editing (Esc)">Done</button>
+    </div>
+    <div class="scroll">
+      <h3>Tools</h3>
+      <div class="ep-tools">
+        <button data-tool="draw" title="Click to place vertices; click the first one to finish">
+          <svg viewBox="0 0 20 20"><path d="M3 15l4-11 9 4-3 8z"/></svg><span>New field</span><kbd>N</kbd></button>
+        <button data-tool="split" title="Click two points across the fields to split">
+          <svg viewBox="0 0 20 20"><path d="M3 4h14v12H3z"/><path d="M8 1.5l4 17" stroke-dasharray="2 1.5"/></svg><span>Split</span><kbd>S</kbd></button>
+        <button data-tool="smooth" title="Brush over jagged edges to straighten them">
+          <svg viewBox="0 0 20 20"><path d="M2 14l3-3 2 2 3-4 2 2 3-3 3 2"/><path d="M2 7h16" stroke-dasharray="2 1.5"/></svg><span>Smooth brush</span><kbd>B</kbd></button>
+        <button id="et-merge" title="Merge the selected fields, or pick fields to merge">
+          <svg viewBox="0 0 20 20"><path d="M2 5h6v10H2zM12 5h6v10h-6z"/><path d="M7 10h6"/></svg><span>Merge</span><kbd>M</kbd></button>
+        <button id="et-bulk" title="Click many fields, then keep or discard them all at once">
+          <svg viewBox="0 0 20 20"><path d="M3 3h6v6H3zM11 11h6v6h-6z"/><path d="M12 4l2 2 3-3"/></svg><span>Bulk select</span><kbd></kbd></button>
+        <button id="et-delete" class="danger" disabled title="Delete the selected fields">
+          <svg viewBox="0 0 20 20"><path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11"/></svg><span>Delete</span><kbd>Del</kbd></button>
+      </div>
+      <div id="ep-selection" class="ep-selection muted small">Click a field to select it; Shift+click to add more.</div>
+
+      <h3>Options</h3>
+      <div class="toggles">
+        <label class="switch"><span>Show fields (H)
+          <i class="info" data-tip="Hide the field polygons to see the imagery underneath. Fields can't be selected while hidden."></i></span>
+          <input id="et-show-fields" type="checkbox" checked><i></i></label>
+        <label class="switch"><span>No overlaps
+          <i class="info" data-tip="Clip new and edited fields so they don't overlap their neighbours."></i></span>
+          <input id="et-avoid" type="checkbox"><i></i></label>
+        <label class="switch"><span>Snap to nearby fields
+          <i class="info" data-tip="Snap vertices to nearby fields while drawing and editing."></i></span>
+          <input id="et-snap" type="checkbox" checked><i></i></label>
+      </div>
+
+      <h3>Fields <span id="ep-count" class="ep-count"></span></h3>
+      <ul id="ep-fields" class="ep-list"></ul>
+    </div>
+  </section>
+
   <div class="scroll">
     <!-- ======================================================= 1. Area -->
     <div class="tab-pane" data-pane="area" role="tabpanel">
@@ -196,7 +242,7 @@
     <div id="results-empty" class="empty-note">No run selected. Start one under <a href="#" data-goto="run">Run</a>, or pick a previous run below.</div>
     <section id="results" class="card card-accent hidden">
       <h2>Results <span id="result-name" class="result-name"></span>
-        <i class="info" data-tip="Fields of the selected run. Click a field on the map for its area, perimeter and confidence. Use Edit polygons to correct the shapes."></i></h2>
+        <i class="info" data-tip="Fields of the selected run. Click a field on the map for its area, perimeter and confidence. Use Edit fields, next to this panel, to correct the shapes."></i></h2>
       <div id="result-stats" class="stats"></div>
       <label class="conf">
         <span class="lbl">Minimum confidence <output id="confidence-val"></output>
@@ -214,32 +260,16 @@
         <input id="imagery-opacity" type="range" min="0" max="1" step="0.05" value="1" title="Imagery opacity">
       </div>
 
-      <h3>Edit fields
-        <i class="info" data-tip="Correct the delineation in the browser, like in QGIS: drag vertices, draw missing fields, split, merge and delete. Snaps to neighbouring fields; every change is saved at once and can be undone. Or open the boundaries in QGIS (on Esri World Imagery) and load your edits back."></i>
+      <h3>Edit in QGIS
+        <i class="info" data-tip="Edit the fields in the browser with Edit fields, next to this panel, or open the boundaries in QGIS (on Esri World Imagery) and load your edits back."></i>
         <span id="edited-note" class="edited-note hidden"></span></h3>
-      <div class="row">
-        <button id="btn-edit" class="btn btn-outline grow" title="Edit polygons in the browser">
-          <svg viewBox="0 0 20 20"><path d="M4 16l1-4 8-8 3 3-8 8z M11 6l3 3"/></svg>
-          <span>Edit polygons</span>
-        </button>
-        <button id="btn-qgis" class="btn btn-outline" title="Open the field boundaries in QGIS, on Esri World Imagery">
-          <svg viewBox="0 0 20 20"><path d="M11 3h6v6M17 3l-8 8M14 12v5H3V6h5"/></svg>QGIS
-        </button>
-      </div>
+      <button id="btn-qgis" class="btn btn-outline btn-block" title="Open the field boundaries in QGIS, on Esri World Imagery">
+        <svg viewBox="0 0 20 20"><path d="M11 3h6v6M17 3l-8 8M14 12v5H3V6h5"/></svg>Open in QGIS
+      </button>
       <div id="qgis-import" class="qgis-import hidden">
         <span class="muted small">Edited in QGIS? Save the layer there, then</span>
         <button id="btn-qgis-import" class="btn btn-outline btn-sm">Load edits</button>
       </div>
-
-      <details>
-        <summary>Re-filter polygons (no model re-run)
-          <i class="info" data-tip="Rebuild the polygons from the model output with another minimum area or simplification. This replaces manual edits; Undo in the edit toolbar brings them back."></i></summary>
-        <div class="grid2">
-          <label><span class="lbl">Min area (m²)</span><input id="pp-min-area" type="number" min="0" step="100"></label>
-          <label><span class="lbl">Simplify (m)</span><input id="pp-simplify" type="number" min="0" step="0.5"></label>
-        </div>
-        <button id="btn-postprocess" class="btn btn-outline btn-block">Apply</button>
-      </details>
 
       <h3>Export
         <i class="info" data-tip="Exports the fields currently visible (above the minimum confidence). UTM keeps metric coordinates (best for area calculations); KML and GeoJSON are always WGS84."></i>
@@ -305,7 +335,7 @@
 
 <main id="map"></main>
 <div id="map-legend" class="hidden"></div>
-<div id="edit-toolbar" class="hidden" role="toolbar" aria-label="Edit fields">
+<div id="edit-toolbar" class="hidden idle" role="toolbar" aria-label="Edit fields">
   <div id="et-hint" class="et-hint"></div>
   <div id="et-bulkbar" class="et-bulkbar hidden">
     <button id="et-bulk-discard" class="danger">Discard 0 selected</button>
@@ -315,34 +345,25 @@
   </div>
   <div class="et-dock">
     <div class="et-group">
-      <button data-tool="draw" title="Draw a new field (N)">
-        <svg viewBox="0 0 20 20"><path d="M3 15l4-11 9 4-3 8z"/></svg><span>New field</span></button>
-      <button data-tool="split" title="Draw a line across fields to split them (S)">
-        <svg viewBox="0 0 20 20"><path d="M3 4h14v12H3z"/><path d="M8 1.5l4 17" stroke-dasharray="2 1.5"/></svg><span>Split</span></button>
-      <button id="et-merge" title="Merge the selected fields (M)">
-        <svg viewBox="0 0 20 20"><path d="M2 5h6v10H2zM12 5h6v10h-6z"/><path d="M7 10h6"/></svg><span>Merge</span></button>
+      <button id="et-start" class="primary" title="Edit fields (E)">
+        <svg viewBox="0 0 20 20"><path d="M4 16l1-4 8-8 3 3-8 8z M11 6l3 3"/></svg><span>Edit fields</span></button>
+    </div>
+    <div class="et-group et-refilter">
+      <button id="et-refilter-toggle" title="Re-filter polygons">
+        <svg viewBox="0 0 20 20"><path d="M3 4h14l-5.5 6.5V16l-3 1.5v-7z"/></svg><span>Re-filter</span></button>
+      <div class="et-pop">
+        <span class="et-label">Re-filter polygons</span>
+        <label>Min area (m²)<input id="pp-min-area" type="number" min="0" step="100"></label>
+        <label>Simplify (m)<input id="pp-simplify" type="number" min="0" step="0.5"></label>
+        <button id="btn-postprocess" class="primary"><span>Apply</span></button>
+        <p class="et-pop-note">Rebuilds the model's polygons without re-running it. Edited and drawn fields are kept; deleted ones stay deleted.</p>
+      </div>
     </div>
     <div class="et-group">
-      <button id="et-bulk" title="Click many fields, then keep or discard them all at once">
-        <svg viewBox="0 0 20 20"><path d="M3 3h6v6H3zM11 11h6v6h-6z"/><path d="M12 4l2 2 3-3"/></svg><span>Bulk select</span></button>
-      <button id="et-delete" class="danger" title="Delete the selected fields (Del)">
-        <svg viewBox="0 0 20 20"><path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11"/></svg><span>Delete</span></button>
-    </div>
-    <div class="et-group">
-      <button id="et-undo" title="Undo the last change (Ctrl+Z)">
+      <button data-action="undo" title="Undo the last change (Ctrl+Z)">
         <svg viewBox="0 0 20 20"><path d="M7 4L3 8l4 4"/><path d="M3 8h9a4.5 4.5 0 010 9H9"/></svg><span>Undo</span></button>
-      <button id="et-redo" title="Redo the undone change (Ctrl+Y)">
+      <button data-action="redo" title="Redo the undone change (Ctrl+Y)">
         <svg viewBox="0 0 20 20"><path d="M13 4l4 4-4 4"/><path d="M17 8H8a4.5 4.5 0 000 9h3"/></svg><span>Redo</span></button>
-    </div>
-    <div class="et-group et-options">
-      <label class="et-switch" title="Clip new and edited fields so they don't overlap their neighbours">
-        <input id="et-avoid" type="checkbox"><i></i>No overlaps</label>
-      <label class="et-switch" title="Snap vertices to nearby fields while drawing and editing">
-        <input id="et-snap" type="checkbox" checked><i></i>Snap</label>
-    </div>
-    <div class="et-group">
-      <button id="et-done" class="primary" title="Stop editing (Esc)">
-        <svg viewBox="0 0 20 20"><path d="M4 10.5l4 4 8-9"/></svg><span>Done</span></button>
     </div>
   </div>
 </div>
