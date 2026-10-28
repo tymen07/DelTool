@@ -18,7 +18,7 @@ from deltool.delineation import model as model_loader
 from deltool.export import FORMATS, export_fields
 from deltool.imagery import plan_mosaic, wayback
 from deltool.jobs import JobManager
-from deltool.pipeline import RunParams, imagery_info, load_fields, postprocess
+from deltool.pipeline import RunParams, imagery_info, load_fields, save_fields
 
 
 
@@ -260,11 +260,15 @@ def get_fields(job_id: str):
 @app.post("/api/jobs/{job_id}/postprocess")
 def rerun_postprocess(job_id: str, req: PostprocessRequest):
     """Re-polygonize with new filters without running the model again.
-    This replaces manual edits, so it can be undone like an edit."""
+    Manual edits are kept (see editing.refilter); it can be undone like an edit."""
     job = _done_job(job_id)
+    previous = {"min_area_m2": job.params.get("min_area_m2", config.DEFAULT_MIN_FIELD_AREA_M2),
+                "simplify_m": job.params.get("simplify_m", config.DEFAULT_SIMPLIFY_M),
+                "min_confidence": job.result.get("min_confidence", 0.0)}
     with _edit_lock:
+        fields = editing.refilter(job.dir, req.min_area_m2, req.simplify_m, req.min_confidence, previous)
         editing.snapshot(job.dir)
-        fields = postprocess(job.dir, req.min_area_m2, req.simplify_m, req.min_confidence)
+        save_fields(fields, job.dir)
     job.params.update(min_area_m2=req.min_area_m2, simplify_m=req.simplify_m)
     job.result.update(min_confidence=req.min_confidence)
     _edited(job, fields)

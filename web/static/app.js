@@ -252,6 +252,7 @@ function selectDevice(choice) {
 // One Geoman draw mode at a time: the bbox (rectangle), a new field
 // (polygon) or a split line.
 function startDraw(kind) {
+  stopSmooth();
   map.pm.disableDraw();
   state.drawKind = state.createKind = kind;
   if (kind === "bbox") {
@@ -268,7 +269,8 @@ function startDraw(kind) {
 }
 
 function cancelDraw() {
-  if (state.drawKind) map.pm.disableDraw();
+  if (state.drawKind === "smooth") stopSmooth();
+  else if (state.drawKind) map.pm.disableDraw();
 }
 
 map.on("pm:drawend", () => {
@@ -295,6 +297,120 @@ map.on("pm:create", (e) => {
     editRequest("/fields/split", { line: e.layer.toGeoJSON().geometry, field_ids: [...state.selected] });
   }
 });
+
+// ------------------------------------------------------------- smooth brush
+// Hold the left button and brush over an outline: every vertex under the
+// brush is removed, so its neighbours are joined by a straight edge.
+const SMOOTH_RADIUS_PX = 12;
+const SMOOTH_STYLE = { color: YELLOW, weight: 2 * SMOOTH_RADIUS_PX, opacity: 0.3, lineCap: "round", lineJoin: "round",
+  interactive: false, pmIgnore: true, snapIgnore: true };
+const smoothBrush = L.circleMarker([0, 0], { radius: SMOOTH_RADIUS_PX, color: "#fff", weight: 1.5, fill: false,
+  interactive: false, pmIgnore: true, snapIgnore: true });
+let smoothStroke = null;   // { lls, line } while the button is held
+
+function startSmooth() {
+  map.pm.disableDraw();
+  state.drawKind = "smooth";
+  map.dragging.disable();
+  map.getContainer().classList.add("smoothing");
+  syncVertexEdit();
+  updateEditToolbar();
+}
+
+function stopSmooth() {
+  if (state.drawKind !== "smooth") return;
+  state.drawKind = null;
+  if (smoothStroke) map.removeLayer(smoothStroke.line);
+  smoothStroke = null;
+  smoothBrush.remove();
+  map.dragging.enable();
+  map.getContainer().classList.remove("smoothing");
+  syncVertexEdit();
+  updateEditToolbar();
+}
+
+{
+  const el = map.getContainer();
+  let pan = null;   // last pointer position while panning with the right button
+  el.addEventListener("contextmenu", (e) => state.drawKind === "smooth" && e.preventDefault());
+  el.addEventListener("pointerdown", (e) => {
+    if (state.drawKind !== "smooth" || e.target.closest(".leaflet-control")) return;
+    if (e.button === 2) {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      pan = L.point(e.clientX, e.clientY);
+      el.classList.add("panning");
+      return;
+    }
+    if (e.button !== 0) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    const ll = map.mouseEventToLatLng(e);
+    smoothStroke = { lls: [ll], line: L.polyline([ll], SMOOTH_STYLE).addTo(map) };
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (state.drawKind !== "smooth") return;
+    if (pan) {
+      const p = L.point(e.clientX, e.clientY);
+      map.panBy(pan.subtract(p), { animate: false });
+      pan = p;
+    }
+    const ll = map.mouseEventToLatLng(e);
+    smoothBrush.setLatLng(ll);
+    if (!map.hasLayer(smoothBrush)) smoothBrush.addTo(map);
+    if (smoothStroke) { smoothStroke.lls.push(ll); smoothStroke.line.addLatLng(ll); }
+  });
+  el.addEventListener("pointerleave", () => smoothBrush.remove());
+  const end = () => {
+    if (pan) { pan = null; el.classList.remove("panning"); }
+    if (!smoothStroke) return;
+    map.removeLayer(smoothStroke.line);
+    const lls = smoothStroke.lls;
+    smoothStroke = null;
+    applySmoothStroke(lls);
+  };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+}
+
+function applySmoothStroke(lls) {
+  if (!$("et-show-fields").checked) return;   // don't change fields you can't see
+  const R = SMOOTH_RADIUS_PX;
+  const pts = lls.map((ll) => map.latLngToContainerPoint(ll));
+  const sb = L.bounds(pts);
+  const reach = L.bounds(sb.min.subtract([R, R]), sb.max.add([R, R]));
+  const near = ([lng, lat]) => {
+    const p = map.latLngToContainerPoint([lat, lng]);
+    return pts.length === 1 ? p.distanceTo(pts[0]) <= R
+      : pts.some((a, i) => i > 0 && L.LineUtil.pointToSegmentDistance(p, pts[i - 1], a) <= R);
+  };
+  // A ring that drops below three vertices disappears; for the outer ring
+  // that means the whole polygon, which the brush never does.
+  const thinRing = (ring) => {
+    const open = ring.slice(0, -1);
+    const kept = open.filter((c) => !near(c));
+    return kept.length >= 3 ? [...kept, kept[0]] : null;
+  };
+  const thinPolygon = ([outer, ...holes]) => {
+    const o = thinRing(outer);
+    return o && [o, ...holes.map(thinRing).filter(Boolean)];
+  };
+  let tooMuch = false;
+  state.layers.forEach((layer, id) => {
+    const lb = layer.getBounds();
+    const box = L.bounds(map.latLngToContainerPoint(lb.getNorthWest()), map.latLngToContainerPoint(lb.getSouthEast()));
+    if (!box.intersects(reach)) return;
+    const geom = layer.toGeoJSON().geometry;
+    const before = JSON.stringify(geom.coordinates);
+    let coords;
+    if (geom.type === "Polygon") coords = thinPolygon(geom.coordinates);
+    else coords = geom.coordinates.map(thinPolygon).filter(Boolean);
+    if (!coords || !coords.length) { tooMuch = true; return; }
+    if (JSON.stringify(coords) === before) return;
+    editRequest(`/fields/${id}`, { geometry: { type: geom.type, coordinates: coords }, avoid_overlap: avoidOverlap() }, "PUT");
+  });
+  if (tooMuch) toast("That stroke would remove the whole field; brush over fewer vertices.", "error");
+}
 
 // ------------------------------------------------------------- bbox
 $("btn-draw").onclick = () => { setEditing(false); startDraw("bbox"); };
@@ -720,6 +836,7 @@ function clearResults() {
   $("results").classList.add("hidden");
   $("results-empty").classList.remove("hidden");
   $("map-legend").classList.add("hidden");
+  $("edit-toolbar").classList.add("hidden");
 }
 
 async function showResults(job, { fit = false } = {}) {
@@ -784,6 +901,7 @@ function renderFields() {
   syncResultLayers();
   syncVertexEdit();
   renderStats();
+  renderFieldList();
   updateEditToolbar();
 }
 map.on("mouseout", () => setHover(null));
@@ -877,7 +995,7 @@ $("imagery-opacity").oninput = (e) => state.imageryLayer?.setOpacity(parseFloat(
 
 $("btn-postprocess").onclick = async () => {
   const btn = $("btn-postprocess");
-  btn.disabled = true; btn.textContent = "Applying…";
+  btn.disabled = true; btn.lastChild.textContent = "Applying…";
   try {
     const job = await api(`/api/jobs/${state.activeJob.id}/postprocess`, {
       method: "POST",
@@ -886,12 +1004,19 @@ $("btn-postprocess").onclick = async () => {
     state.activeJob = job;
     await showResults(job);
     refreshJobList();
+    $("et-refilter-toggle").parentElement.classList.remove("open");
   } catch (err) {
     toast(err.message, "error");
   } finally {
-    btn.disabled = false; btn.textContent = "Apply";
+    btn.disabled = false; btn.lastChild.textContent = "Apply";
   }
 };
+
+// Re-filter is a flyout on the dock; a click elsewhere closes it.
+$("et-refilter-toggle").onclick = () => $("et-refilter-toggle").parentElement.classList.toggle("open");
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".et-refilter")) $("et-refilter-toggle").parentElement.classList.remove("open");
+});
 
 $("btn-export").onclick = () => {
   const q = new URLSearchParams({
@@ -910,12 +1035,10 @@ function setEditing(on) {
   cancelDraw();
   map.closePopup();
   if (!on) { state.selected.clear(); state.bulk = false; }
-  if (on) $("toggle-fields").checked = true;
+  if (on) $("toggle-fields").checked = $("et-show-fields").checked = true;
   syncResultLayers();
   document.body.classList.toggle("editing", on);
-  $("edit-toolbar").classList.toggle("hidden", !on);
-  $("btn-edit").classList.toggle("active", on);
-  $("btn-edit").querySelector("span").textContent = on ? "Stop editing" : "Edit polygons";
+  $("edit-toolbar").classList.toggle("idle", !on);
   syncBBoxEditing();
   refreshSelection();
 }
@@ -939,17 +1062,41 @@ map.on("click", () => {
   }
 });
 
+const vertexEditOpts = () => ({ ...snapOpts(), allowSelfIntersection: false, draggable: false });
+
+// Toggling Snap applies right away to the line being drawn and the field
+// being reshaped. (No overlaps is read when each edit is sent.)
+$("et-snap").addEventListener("change", () => {
+  if (state.drawKind === "field" || state.drawKind === "split") {
+    const draw = map.pm.Draw[state.drawKind === "field" ? "Polygon" : "Line"];
+    draw.setOptions(snapOpts());
+    if (draw._hintMarker) draw._hintMarker._snapped = false;
+  }
+  const layer = state.vertexLayer;
+  if (layer?.pm.enabled()) {
+    layer.pm.disable();
+    layer.pm.enable(vertexEditOpts());
+  }
+});
+
+// Hiding the fields while editing shows the imagery; nothing stays selected.
+$("et-show-fields").addEventListener("change", (e) => {
+  if (!e.target.checked) { state.selected.clear(); setHover(null); }
+  syncResultLayers();
+  refreshSelection();
+});
+
 // Vertex editing is on for exactly one selected field.
 function syncVertexEdit() {
   const only = state.selected.size === 1 && !state.bulk ? state.layers.get([...state.selected][0]) : null;
-  const target = state.editing && !state.drawKind ? only : null;
+  const target = state.editing && !state.drawKind && $("et-show-fields").checked ? only : null;
   const current = state.vertexLayer;
   if (current && current !== target) {
     current.off("pm:edit", onVertexEdit);
     if (current.pm.enabled()) current.pm.disable();
   }
   if (target && current !== target) {
-    target.pm.enable({ ...snapOpts(), allowSelfIntersection: false, draggable: false });
+    target.pm.enable(vertexEditOpts());
     target.on("pm:edit", onVertexEdit);
     target.bringToFront();
   }
@@ -999,17 +1146,17 @@ function applyEdit(res) {
 }
 
 function updateEditToolbar() {
-  if (!state.editing) return;
   const n = state.selected.size;
-  const tb = $("edit-toolbar");
-  tb.querySelector("[data-tool=draw]").classList.toggle("active", state.drawKind === "field");
-  tb.querySelector("[data-tool=split]").classList.toggle("active", state.drawKind === "split");
+  $("edit-panel").querySelector("[data-tool=draw]").classList.toggle("active", state.drawKind === "field");
+  $("edit-panel").querySelector("[data-tool=split]").classList.toggle("active", state.drawKind === "split");
+  $("edit-panel").querySelector("[data-tool=smooth]").classList.toggle("active", state.drawKind === "smooth");
   $("et-merge").disabled = false;
   $("et-delete").disabled = n < 1;
-  $("et-merge").lastChild.textContent = n >= 2 ? `Merge ${n}` : "Merge";
-  $("et-delete").lastChild.textContent = n > 1 ? `Delete ${n}` : "Delete";
-  $("et-undo").disabled = !(state.activeJob?.result.undo_depth > 0);
-  $("et-redo").disabled = !(state.activeJob?.result.redo_depth > 0);
+  $("et-merge").querySelector("span").textContent = n >= 2 ? `Merge ${n}` : "Merge";
+  $("et-delete").querySelector("span").textContent = n > 1 ? `Delete ${n}` : "Delete";
+  document.querySelectorAll("[data-action=undo]").forEach((b) => (b.disabled = !(state.activeJob?.result.undo_depth > 0)));
+  document.querySelectorAll("[data-action=redo]").forEach((b) => (b.disabled = !(state.activeJob?.result.redo_depth > 0)));
+  syncEditPanelSelection();
   const total = state.geojson?.features.length ?? 0;
   const merging = !!state.bulk && state.bulkKind === "merge";
   $("et-bulk").classList.toggle("active", !!state.bulk && !merging);
@@ -1028,16 +1175,18 @@ function updateEditToolbar() {
     merging ? `Merge: click the fields you want to join (${n} selected), then press Merge. Esc cancels.` :
     state.bulk ? `Bulk select: click every field you want to keep or discard (${n} selected), then press an OK button. Esc cancels.` :
     state.drawKind === "field" ? "Click to place vertices; click the first vertex to finish. Snaps to nearby fields. Esc cancels." :
+    state.drawKind === "smooth" ? "Hold the left mouse button and brush over a jagged edge: the vertices under the brush are removed and the edge is redrawn straight. Drag with the right button to move the map. Esc stops." :
     state.drawKind === "split" ? `Click two points to draw a line across ${n === 1 ? "the selected field" : "the fields to split"}; it splits as soon as you place the second. Esc cancels.` :
     n === 0 ? "" :
     n === 1 ? "Drag a vertex to reshape, drag a midpoint to add one, right-click a vertex to remove it. Shift+click more fields to merge." :
     `${n} fields selected: merge or delete them.`;
 }
 
-$("btn-edit").onclick = () => setEditing(!state.editing);
+$("et-start").onclick = () => setEditing(true);
 $("et-done").onclick = () => setEditing(false);
-$("edit-toolbar").querySelector("[data-tool=draw]").onclick = () => (state.drawKind === "field" ? cancelDraw() : startDraw("field"));
-$("edit-toolbar").querySelector("[data-tool=split]").onclick = () => (state.drawKind === "split" ? cancelDraw() : startDraw("split"));
+$("edit-panel").querySelector("[data-tool=draw]").onclick = () => (state.drawKind === "field" ? cancelDraw() : startDraw("field"));
+$("edit-panel").querySelector("[data-tool=split]").onclick = () => (state.drawKind === "split" ? cancelDraw() : startDraw("split"));
+$("edit-panel").querySelector("[data-tool=smooth]").onclick = () => (state.drawKind === "smooth" ? cancelDraw() : startSmooth());
 const mergeSelected = () => editRequest("/fields/merge", { field_ids: [...state.selected], avoid_overlap: avoidOverlap() });
 // With two or more fields selected, Merge joins them right away. Otherwise it
 // starts a merge mode where you click the fields to join, then confirm.
@@ -1050,8 +1199,10 @@ $("et-bulk-merge").onclick = async () => {
   if (state.selected.size >= 2 && await mergeSelected()) setBulk(false);
 };
 $("et-delete").onclick = () => state.selected.size && editRequest("/fields/delete", { field_ids: [...state.selected] });
-$("et-undo").onclick = () => editRequest("/fields/undo");
-$("et-redo").onclick = () => editRequest("/fields/redo");
+const undo = () => editRequest("/fields/undo");
+const redo = () => editRequest("/fields/redo");
+document.querySelectorAll("[data-action=undo]").forEach((b) => (b.onclick = undo));
+document.querySelectorAll("[data-action=redo]").forEach((b) => (b.onclick = redo));
 
 function setBulk(on, kind = "select") {
   state.bulk = on;
@@ -1074,6 +1225,45 @@ $("et-bulk-keep").onclick = async () => {
 };
 L.DomEvent.disableClickPropagation($("edit-toolbar"));
 
+// ------------------------------------------------------------- edit panel
+// The sidebar while editing: tools, options and a field list.
+const zoomToLayers = (layers) => {
+  if (!layers.length) return;
+  const bounds = layers.reduce((b, l) => b.extend(l.getBounds()), L.latLngBounds(layers[0].getBounds()));
+  map.fitBounds(bounds, { padding: [80, 80], maxZoom: Math.max(map.getZoom(), 16) });
+};
+
+function renderFieldList() {
+  const visible = visibleFeatures().slice().sort((a, b) => b.properties.area_ha - a.properties.area_ha);
+  $("ep-count").textContent = `${fmt(visible.length)} shown`;
+  $("ep-fields").innerHTML = visible.map(({ properties: p }) => `
+    <li data-id="${p.field_id}"><b>#${p.field_id}</b><span class="grow">${fmt(p.area_ha, 2)} ha</span>
+      <span class="muted">${p.source === "model" ? `conf ${p.confidence.toFixed(2)}` : esc(p.source)}</span></li>`).join("");
+  syncEditPanelSelection();
+}
+
+function syncEditPanelSelection() {
+  const n = state.selected.size;
+  $("ep-fields").querySelectorAll("li").forEach((li) => li.classList.toggle("selected", state.selected.has(+li.dataset.id)));
+  const area = [...state.selected].reduce((s, id) => s + (state.layers.get(id)?.feature.properties.area_ha ?? 0), 0);
+  $("ep-selection").innerHTML = n === 0 ? "Click a field to select it; Shift+click to add more."
+    : `<b>${n}</b> field${n > 1 ? "s" : ""} selected · ${fmt(area, 2)} ha` +
+      (n === 1 ? " · drag its vertices to reshape" : " · Merge or Delete them");
+}
+
+$("ep-fields").addEventListener("click", (e) => {
+  const li = e.target.closest("li");
+  if (!li) return;
+  const id = +li.dataset.id;
+  selectField(id, e.shiftKey || e.ctrlKey || e.metaKey);
+  if (state.selected.has(id)) zoomToLayers([state.layers.get(id)].filter(Boolean));
+});
+$("ep-fields").addEventListener("mouseover", (e) => {
+  const li = e.target.closest("li");
+  if (li) setHover(state.layers.get(+li.dataset.id) ?? null);
+});
+$("ep-fields").addEventListener("mouseleave", () => setHover(null));
+
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input, select, textarea")) return;
   if (e.key === "Escape") {
@@ -1083,16 +1273,21 @@ document.addEventListener("keydown", (e) => {
     else if (state.editing) setEditing(false);
     return;
   }
-  if (!state.editing) return;
   const key = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && key === "z" && e.shiftKey) { e.preventDefault(); $("et-redo").click(); }
-  else if ((e.ctrlKey || e.metaKey) && key === "y") { e.preventDefault(); $("et-redo").click(); }
-  else if ((e.ctrlKey || e.metaKey) && key === "z") { e.preventDefault(); $("et-undo").click(); }
+  if (!state.editing) {
+    if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey && !$("edit-toolbar").classList.contains("hidden")) setEditing(true);
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && key === "z" && e.shiftKey) { e.preventDefault(); redo(); }
+  else if ((e.ctrlKey || e.metaKey) && key === "y") { e.preventDefault(); redo(); }
+  else if ((e.ctrlKey || e.metaKey) && key === "z") { e.preventDefault(); undo(); }
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); $("et-delete").click(); }
   else if (e.ctrlKey || e.metaKey || e.altKey) return;
   else if (key === "n") startDraw("field");
   else if (key === "s") startDraw("split");
+  else if (key === "b") $("edit-panel").querySelector("[data-tool=smooth]").click();
   else if (key === "m") $("et-merge").click();
+  else if (key === "h") $("et-show-fields").click();
 });
 
 // A run's imagery, fields and legend are only on the map under Results, so
@@ -1107,9 +1302,10 @@ function syncResultLayers() {
     if (!(on && wanted) && map.hasLayer(layer)) map.removeLayer(layer);
   };
   show(state.imageryLayer, $("toggle-imagery").checked);
-  show(state.fieldsLayer, $("toggle-fields").checked || state.editing);
+  show(state.fieldsLayer, state.editing ? $("et-show-fields").checked : $("toggle-fields").checked);
   if (state.fieldsLayer && map.hasLayer(state.fieldsLayer)) state.fieldsLayer.bringToFront();
   $("map-legend").classList.toggle("hidden", !(on && state.geojson));
+  $("edit-toolbar").classList.toggle("hidden", !(on && state.geojson));
   renderRunOverlays();
 }
 

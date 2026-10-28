@@ -209,30 +209,41 @@ is going. When a run finishes, DelTool switches to *Results*.
    can slide in both directions without re-running. Click a field for its
    area, perimeter and confidence, or to delete it. The exact imagery the model
    saw is shown on top of the basemap (*Imagery seen by the model*, on by
-   default); switch it off to go back to the Esri basemap. *Re-filter* polygons by
-   minimum area or simplification without re-running the model. The run's
+   default); switch it off to go back to the Esri basemap. *Re-filter* (next to
+   the sidebar) rebuilds the polygons with another minimum area or simplification
+   without re-running the model. Your edits are kept: edited and drawn fields
+   stay as they are and deleted fields stay deleted. The run's
    imagery and fields are only on the map in the *Results* tab, so the other
    tabs show the plain basemap. Under *Previous runs*, tick several runs to
    download their fields together in one file (with `run_name` and `run_id`
    columns).
-6. **Edit**: *Edit polygons* opens an edit toolbar on the map. You can do
-   this as in QGIS, with snapping to neighbouring fields:
+6. **Edit**: *Edit fields* (next to the sidebar, or E) turns the sidebar into the
+   edit panel. You can do this as in QGIS, with snapping to neighbouring fields:
    - click a field and drag its vertices (drag a midpoint to add a vertex,
      right-click a vertex to remove it)
    - *New field* (N): click the vertices, then click the first one to close
    - *Split* (S): click two points to cut across one or more fields
+   - *Smooth brush* (B): hold the left mouse button and brush over a jagged
+     edge; the vertices under the brush are removed and the edge is redrawn
+     straight. Drag with the right mouse button to move the map meanwhile.
    - *Merge* (M): shift+click several fields and press it, or press it first,
-     click the fields to join and press *Merge N fields*. Gaps of up to 20 m are closed.
+     click the fields to join and press *Merge N fields*. Gaps of up to 20 m
+     are closed, and slivers or wedges up to about 8 m wide between the fields
+     are filled, so the result is one clean shape.
    - *Bulk select*: click all the fields you want to keep or discard, then
      press *Discard selected* or *Keep selected, discard the rest*
    - *Delete* (Del), *Undo* (Ctrl+Z, up to 30 steps) and *Redo* (Ctrl+Y or Ctrl+Shift+Z)
+   - *Show fields* (H) hides the polygons to see the imagery underneath.
    - *No overlaps* (off by default) clips new and edited fields against their
      neighbours. If that splits a shape, only the largest piece is kept.
    - *Snap* (on by default) snaps vertices to nearby fields; switch it off if
-     the corners you click jump to other places.
+     the corners you click jump to other places. Both switches apply at once,
+     also in the middle of drawing or reshaping.
+   - The *Fields* list shows every visible field, largest first; click one
+     to select it and zoom to it.
 
    Every change is saved immediately. The field's `source` becomes `edited`,
-   or `manual` for a drawn field. *QGIS* opens the field boundaries in a locally
+   or `manual` for a drawn field. *Open in QGIS* (Results tab) opens the field boundaries in a locally
    installed QGIS, on top of Esri World Imagery (XYZ tiles). The imagery
    GeoTIFF is not included. A `.qgz` project is saved next to the fields, so
    you can reopen it later. After saving the layer there, *Load edits* reads
@@ -254,7 +265,7 @@ deltool/
   api.py                   FastAPI routes + serves the frontend
   jobs.py                  background job queue, job.json persistence
   pipeline.py              bbox -> imagery -> model -> polygons
-  editing.py               reshape / draw / merge / split / delete fields, undo
+  editing.py               reshape / draw / merge / split / delete / re-filter fields, undo
   qgis.py                  find and open a local QGIS
   weights.py               download + checksum missing model weights
   environment.py           .venv creation, package check and install

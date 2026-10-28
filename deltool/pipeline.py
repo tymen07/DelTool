@@ -83,14 +83,12 @@ def load_labels(run_dir: Path) -> LabelRaster:
                        transform=transform, crs=crs)
 
 
-def postprocess(run_dir: Path, min_area_m2, simplify_m, min_confidence=0.0) -> gpd.GeoDataFrame:
-    """(Re)build fields.gpkg from the stored label raster."""
+def vectorize_run(run_dir: Path, min_area_m2, simplify_m, min_confidence=0.0) -> gpd.GeoDataFrame:
+    """Fields as the stored label raster gives them with these filters."""
     raster = load_labels(run_dir)
     if min_confidence > 0:
         raster.labels[raster.scores[raster.labels] < min_confidence] = 0
-    fields = vectorize_labels(raster, min_area_m2=min_area_m2, simplify_m=simplify_m)
-    save_fields(fields, run_dir)
-    return fields
+    return vectorize_labels(raster, min_area_m2=min_area_m2, simplify_m=simplify_m)
 
 
 def save_fields(fields: gpd.GeoDataFrame, run_dir: Path):

@@ -19,12 +19,14 @@ from shapely.ops import split as split_geometry
 from shapely.ops import unary_union
 
 from deltool.config import EDIT_HISTORY_LIMIT
-from deltool.pipeline import FIELDS_FILE, load_fields, save_fields
+from deltool.pipeline import FIELDS_FILE, load_fields, save_fields, vectorize_run
 
 HISTORY_DIR = "edits"
 REDO_DIR = "redo"
 MIN_PART_M2 = 1.0                    # smaller pieces are dropped as slivers
 MERGE_GAP_STEPS_M = (1, 3, 6, 10)    # gaps closed when merging fields that don't touch
+MERGE_SMOOTH_M = 4.0                 # slivers/wedges up to 2x this wide are filled on every merge
+MERGE_SIMPLIFY_M = 0.5               # outline vertices within this of a straight line are dropped
 
 
 class EditError(ValueError):
@@ -172,18 +174,26 @@ def add_field(run_dir: Path, geojson: dict, avoid_overlap=True):
     return _commit(run_dir, _replace(fields, [], [record])), [field_id], []
 
 
+def _close(geom, rows, gap):
+    """Fill slivers, wedges and gaps narrower than 2 * gap; mitre joins keep
+    the real corners square. The original fields are always kept whole."""
+    closed = geom.buffer(gap, join_style="mitre").buffer(-gap, join_style="mitre")
+    return unary_union([closed, *rows.geometry.values])
+
+
 def merge(run_dir: Path, field_ids: list[int], avoid_overlap=True):
     if len(set(field_ids)) < 2:
         raise EditError("Select at least two fields to merge.")
     fields = load_fields(run_dir)
     rows = _rows(fields, field_ids)
-    merged = unary_union(rows.geometry.values)
+    merged = _close(unary_union(rows.geometry.values), rows, MERGE_SMOOTH_M)
     # Fields usually have a narrow margin between them: close small gaps.
     for gap in MERGE_GAP_STEPS_M:
         if len(_polygons(merged)) <= 1:
             break
-        merged = merged.buffer(gap, join_style="mitre").buffer(-gap, join_style="mitre")
-        merged = unary_union([merged, *rows.geometry.values])
+        merged = _close(merged, rows, gap)
+    # Simplify away the vertices the old shared border left on the outline.
+    merged = merged.simplify(MERGE_SIMPLIFY_M, preserve_topology=True)
     if len(_polygons(merged)) > 1:
         raise EditError(f"These fields are more than {2 * MERGE_GAP_STEPS_M[-1]} m apart; "
                         "only neighbouring fields can be merged.")
@@ -251,6 +261,42 @@ def delete(run_dir: Path, field_ids: list[int]):
     fields = load_fields(run_dir)
     removed = list(_rows(fields, field_ids)["field_id"].astype(int))
     return _commit(run_dir, _replace(fields, removed, [])), [], removed
+
+
+def refilter(run_dir: Path, min_area_m2, simplify_m, min_confidence, previous):
+    """Rebuild the model fields with new filters, keeping manual edits.
+
+    Without edits this is a plain rebuild. Otherwise only the model fields
+    that are still there are rebuilt (fields the user deleted stay gone, and
+    pieces that only pass the new filters don't come back); edited and drawn
+    fields are kept as they are. `previous` holds the old filter values."""
+    fresh = vectorize_run(run_dir, min_area_m2, simplify_m, min_confidence)
+    current = load_fields(run_dir)
+    model = current[current["source"] == "model"]
+    if len(model) == len(current) and len(current) == len(vectorize_run(run_dir, **previous)):
+        return fresh
+    user = current[current["source"] != "model"]
+    model_area = unary_union(model.geometry.values) if len(model) else Polygon()
+    user_area = unary_union(user.geometry.values) if len(user) else Polygon()
+    records = [_record(r["field_id"], r.geometry, r["confidence"], r["source"]) for _, r in user.iterrows()]
+    next_id = max(_next_id(current), _next_id(fresh))
+    for _, cand in fresh.iterrows():
+        geom = cand.geometry
+        if geom.intersection(model_area).area < 0.5 * geom.area:
+            continue
+        if not user_area.is_empty:
+            parts = _polygons(geom.difference(user_area))
+            if not parts:
+                continue
+            geom = parts[0]
+        if geom.area < max(min_area_m2, MIN_PART_M2):
+            continue
+        records.append(_record(next_id, geom, cand["confidence"], "model"))
+        next_id += 1
+    fields = gpd.GeoDataFrame(records, columns=list(current.columns), geometry="geometry", crs=current.crs)
+    fields = fields.sort_values("area_ha", ascending=False).reset_index(drop=True)
+    fields["field_id"] = np.arange(1, len(fields) + 1)
+    return fields
 
 
 def _number(value):

@@ -439,19 +439,43 @@ summary .info { display: inline-grid; vertical-align: -3px; margin-left: 4px; }
 .et-bulkbar button { flex-direction: row; font-size: 12.5px; padding: 8px 14px; }
 .et-dock button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .et-dock button:hover:not(:disabled), .et-bulkbar button:hover:not(:disabled) { background: var(--card); border-color: var(--line); }
-.et-dock button.active { background: rgba(255,184,28,.18); border-color: var(--tud-yellow); color: var(--tud-yellow); }
 .et-dock button.danger:not(:disabled), .et-bulkbar button.danger:not(:disabled) { color: #ff8a80; }
 .et-dock button.primary, .et-bulkbar button.primary { background: var(--tud-yellow); color: var(--tud-darkblue); }
 .et-dock button.primary:hover, .et-bulkbar button.primary:hover:not(:disabled) { background: #ffc94d; }
 .et-dock button:disabled, .et-bulkbar button:disabled { opacity: .35; cursor: not-allowed; }
-.et-options { flex-direction: column; justify-content: center; align-items: flex-start; gap: 8px; }
-.et-switch { display: flex; align-items: center; gap: 8px; line-height: 1; margin: 0; font-size: 11.5px; color: var(--text); cursor: pointer; white-space: nowrap; }
-.et-switch input { position: absolute; opacity: 0; pointer-events: none; }
-.et-switch i { position: relative; width: 26px; height: 15px; border-radius: 999px; background: var(--line); transition: background .15s; flex: none; }
-.et-switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; transition: transform .15s; }
-.et-switch input:checked + i { background: var(--tud-yellow); }
-.et-switch input:checked + i::after { transform: translateX(11px); }
-.et-switch input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
+#map.smoothing, #map.smoothing .leaflet-interactive { cursor: none; }
+#map.smoothing.panning, #map.smoothing.panning .leaflet-interactive { cursor: grabbing; }
+/* Outside edit mode the dock is a slim icon strip attached to the sidebar's
+   right edge (16px + 372px); it starts under the panel so it looks joined.
+   While editing it hides: the tools are in the sidebar, the hint stays on the map. */
+#edit-toolbar:not(.idle) .et-dock { display: none; }
+#edit-toolbar.idle { top: 96px; left: 382px; transform: none; align-items: flex-start; max-width: none; }
+#edit-toolbar.idle .et-dock {
+  flex-direction: column; flex-wrap: nowrap; gap: 0; padding: 4px 4px 4px 10px;
+  border-color: rgba(255,184,28,.55); border-left: 0; border-radius: 0 12px 12px 0;
+}
+#edit-toolbar.idle .et-group { flex-direction: column; gap: 2px; padding: 4px 0; border-right: 0; border-bottom: 1px solid var(--line); }
+#edit-toolbar.idle .et-group:last-child { border-bottom: 0; }
+#edit-toolbar.idle .et-group > button { min-width: 0; width: 36px; height: 36px; padding: 0; }
+#edit-toolbar.idle .et-group > button > span { display: none; }
+#edit-toolbar.idle .et-group > button svg { width: 18px; height: 18px; }
+/* Re-filter opens as a small flyout next to the strip. */
+.et-refilter { position: relative; }
+.et-pop {
+  display: none; position: absolute; top: 0; left: calc(100% + 14px); width: 190px; flex-direction: column; gap: 8px;
+  padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow); backdrop-filter: blur(12px);
+}
+.et-refilter.open .et-pop { display: flex; }
+.et-dock .et-refilter.open > button { background: rgba(255,184,28,.18); border-color: var(--tud-yellow); color: var(--tud-yellow); }
+.et-label { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.et-pop label { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: 11px; color: var(--muted); }
+.et-pop input {
+  width: 100%; box-sizing: border-box; padding: 5px 7px; font: inherit; font-size: 12px; color: var(--text);
+  background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+}
+.et-dock .et-pop button { flex-direction: row; min-width: 0; padding: 6px 10px; font-size: 12px; }
+.et-pop-note { margin: 0; font-size: 10.5px; line-height: 1.35; color: var(--muted); }
 .et-hint {
   padding: 5px 14px; border-radius: 999px; font-size: 12px; color: var(--text); text-align: center;
   background: rgba(12,35,64,.85); border: 1px solid var(--line); backdrop-filter: blur(8px);
@@ -477,7 +501,11 @@ summary .info { display: inline-grid; vertical-align: -3px; margin-left: 4px; }
 .loader-checks li.optional::before { content: "–"; }
 
 @media (max-width: 640px) {
-  #edit-toolbar { left: 50%; max-width: calc(100% - 16px); }
+  /* The sidebar sits at the bottom here, so the dock is a centred row at the top. */
+  #edit-toolbar, #edit-toolbar.idle { top: 16px; left: 50%; transform: translateX(-50%); align-items: center; max-width: calc(100% - 16px); }
+  #edit-toolbar.idle .et-dock { flex-direction: row; padding: 4px; border-left: 1px solid rgba(255,184,28,.55); border-radius: 12px; }
+  #edit-toolbar.idle .et-group { flex-direction: row; padding: 0 4px; border-bottom: 0; border-right: 1px solid var(--line); }
+  .et-pop { top: calc(100% + 10px); left: 50%; transform: translateX(-50%); }
 }
 
 /* ---------------------------------------------------- imagery source */
@@ -575,3 +603,39 @@ body.rainbow .leaflet-container, body.rainbow #map { animation: rb-hue 2s linear
 .et-bulkbar { order: 2; }
 .et-hint { order: 3; }
 #edit-toolbar:not(.busy) .et-hint:empty { display: none; }
+
+/* ------------------------------------------------- edit panel (sidebar) */
+/* While editing, the sidebar shows the edit panel instead of the steps. */
+#edit-panel { display: none; }
+body.editing #edit-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+body.editing #panel > .tabs, body.editing #panel > .scroll { display: none; }
+.ep-head { display: flex; align-items: center; gap: 6px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+.ep-head h2 { margin: 0 auto 0 0; font-family: "Roboto Slab", serif; font-size: 17px; color: #fff; }
+.ep-head .btn-icon { width: 32px; padding: 6px 0; }
+.ep-head .btn-sm { padding: 6px 14px; }
+.ep-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ep-tools button {
+  display: flex; align-items: center; gap: 8px; padding: 9px 10px; font: inherit; font-size: 12.5px; font-weight: 600;
+  color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; text-align: left;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.ep-tools button svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.ep-tools button span { flex: 1; }
+.ep-tools button:hover:not(:disabled) { border-color: var(--tud-yellow); }
+.ep-tools button.active { background: rgba(255,184,28,.18); border-color: var(--tud-yellow); color: var(--tud-yellow); }
+.ep-tools button.danger:not(:disabled) { color: #ff8a80; }
+.ep-tools button:disabled { opacity: .35; cursor: not-allowed; }
+.ep-tools kbd { font: 600 10px/1 "Inter", sans-serif; color: var(--muted); padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; }
+.ep-tools kbd:empty { display: none; }
+.ep-selection { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--card); }
+.ep-selection b { color: var(--tud-yellow); }
+.ep-count { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.ep-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ep-list li {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card); cursor: pointer;
+}
+.ep-list li:hover { border-color: var(--tud-yellow); }
+.ep-list li.selected { border-color: var(--tud-yellow); background: rgba(255,184,28,.12); }
+.ep-list li .grow { flex: 1; min-width: 0; }
+.ep-list li .muted { font-size: 11px; }
