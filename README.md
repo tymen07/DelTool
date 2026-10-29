@@ -218,25 +218,31 @@ is going. When a run finishes, DelTool switches to *Results*.
    download their fields together in one file (with `run_name` and `run_id`
    columns).
 6. **Edit**: *Edit fields* (next to the sidebar, or E) turns the sidebar into the
-   edit panel. You can do this as in QGIS, with snapping to neighbouring fields:
+   edit panel. You can do this as in QGIS, with snapping to neighbouring fields.
+   Dragging with the right mouse button always moves the map, whatever tool is
+   active. All shortcuts are on the left half of the keyboard.
+   - click a field to select it; Shift+click or Shift+drag a box adds more.
+     *Merge* (C) and *Delete* (R) act on whatever is selected, also in
+     *Bulk select*: select, press C or R, done
    - click a field and drag its vertices (drag a midpoint to add a vertex,
      right-click a vertex to remove it)
-   - *New field* (N): click the vertices, then click the first one to close
+   - *New field* (D): click the vertices, then click the first one to close
    - *Split* (S): click two points to cut across one or more fields
-   - *Smooth brush* (B): hold the left mouse button and brush over a jagged
-     edge; the vertices under the brush are removed and the edge is redrawn
-     straight. Drag with the right mouse button to move the map meanwhile.
-   - *Merge* (M): shift+click several fields and press it, or press it first,
+   - *Smooth brush* (B): click the fields you want to smooth, then hold the
+     left mouse button and brush over a jagged edge; the vertices of those
+     fields under the brush are removed and the edge is redrawn straight.
+     Other fields are left alone.
+   - *Merge* (C): shift+click several fields and press it, or press it first,
      click the fields to join and press *Merge N fields*. Gaps of up to 20 m
      are closed, and slivers or wedges up to about 8 m wide between the fields
      are filled, so the result is one clean shape.
-   - *Bulk select*: click all the fields you want to keep or discard, then
+   - *Bulk select* (A): click all the fields you want to keep or discard, then
      press *Discard selected* or *Keep selected, discard the rest*
-   - *Delete* (Del), *Undo* (Ctrl+Z, up to 30 steps) and *Redo* (Ctrl+Y or Ctrl+Shift+Z)
-   - *Show fields* (H) hides the polygons to see the imagery underneath.
-   - *No overlaps* (off by default) clips new and edited fields against their
+   - *Delete* (R or Del), *Undo* (Ctrl+Z, up to 30 steps) and *Redo* (Ctrl+Shift+Z or Ctrl+Y)
+   - *Show fields* (V) hides the polygons to see the imagery underneath.
+   - *No overlaps* (X, off by default) clips new and edited fields against their
      neighbours. If that splits a shape, only the largest piece is kept.
-   - *Snap* (on by default) snaps vertices to nearby fields; switch it off if
+   - *Snap* (G, on by default) snaps vertices to nearby fields; switch it off if
      the corners you click jump to other places. Both switches apply at once,
      also in the middle of drawing or reshaping.
    - The *Fields* list shows every visible field, largest first; click one

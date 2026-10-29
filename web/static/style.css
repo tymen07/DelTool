@@ -444,7 +444,7 @@ summary .info { display: inline-grid; vertical-align: -3px; margin-left: 4px; }
 .et-dock button.primary:hover, .et-bulkbar button.primary:hover:not(:disabled) { background: #ffc94d; }
 .et-dock button:disabled, .et-bulkbar button:disabled { opacity: .35; cursor: not-allowed; }
 #map.smoothing, #map.smoothing .leaflet-interactive { cursor: none; }
-#map.smoothing.panning, #map.smoothing.panning .leaflet-interactive { cursor: grabbing; }
+#map.panning, #map.panning .leaflet-interactive { cursor: grabbing; }
 /* Outside edit mode the dock is a slim icon strip attached to the sidebar's
    right edge (16px + 372px); it starts under the panel so it looks joined.
    While editing it hides: the tools are in the sidebar, the hint stays on the map. */
